@@ -1,7 +1,20 @@
+///////////////////////////////////////////////////////////////////////////////
+#define RF69_COMPAT      1   // define this to use the RF69 driver i.s.o. RF12 
+//                           // The above flag must be set similarly in RF12.cpp
+//                           // and RF69_avr.h
+///////////////////////////////////////////////////////////////////////////////
 #include <JeeLib.h>
 #include <avr/sleep.h>
 #include <OneWire.h>
 #define AIO2 9 // d9
+#define SALUSID 16
+#define ON  1
+#define OFF 2
+#define REG_BITRATEMSB 0x03  // RFM69 only, 0x02, // BitRateMsb, data rate = 49,261 khz
+#define REG_BITRATELSB 0x04  // RFM69 only, 0x8A, // BitRateLsb divider = 32 MHz / 650 == 49,230 khz
+#define REG_BITFDEVMSB 0x05  // RFM69 only, 0x02, // FdevMsb = 45 KHz
+#define REG_BITFDEVLSB 0x06  // RFM69 only, 0xE1, // FdevLsb = 45 KHz
+
 OneWire  ds(PD7); // DIO4
 /*
  * This code monitors dimensions of a home heating system and exercises
@@ -36,20 +49,22 @@ byte TankCoilReturn[8] = {0x28,0x7F,0xC6,0x4D,0x04,0x00,0x00,0xFF};
 byte HotFeed[8] = {0x28,0x53,0x4F,0x4E,0x04,0x00,0x00,0x84};
 
 byte addr[8];
-
+unsigned long salusMillis = 0;
+byte salusOff[] = {212, SALUSID, SALUSID | OFF, 90};
 ISR(WDT_vect) { Sleepy::watchdogEvent(); }
 //
 /////////////////////////////////////////////////////////////////////////////////////
 struct payload{                                                                    //
-byte count :8; // packet count  //
-unsigned ColdFeed :16;
-unsigned int BoilerFeed :16;
-unsigned int CentralHeatingReturn :16;
-unsigned int TankCoilReturn :16;
-unsigned int HotFeed :16;
+byte count; // packet count
+byte salusCommand;
+unsigned ColdFeed;
+unsigned int BoilerFeed;
+unsigned int CentralHeatingReturn;
+unsigned int TankCoilReturn;
+unsigned int HotFeed;
 } payload;                                                                         //
 /////////////////////////////////////////////////////////////////////////////////////
-//
+
 unsigned int getTemp(void)
 {
   byte i;
@@ -91,25 +106,16 @@ unsigned int getTemp(void)
 // 28 C9 C5 4D 4 00 00 04
 //////////////////////////
 void setup () {
-  delay(1000);          // Delay on startup to avoid ISP/RFM12B interference.
+  delay(100);          // Delay on startup to avoid ISP/RFM12B interference.
   Serial.begin(57600);
-    Serial.println("Heating monitor:");
-    if (rf12_configSilent()) {
-        rf12_configDump();
-    } else {
-          while( true ){
-            Serial.println("RF12 eeprom not valid, run RF12Demo");
-            Sleepy::loseSomeTime(60000);
-          }  
-    }
-  rf12_control(0xC040); // set low-battery level to 2.2V i.s.o. 3.1V
-  rf12_sleep(RF12_SLEEP);
-
-//  Serial.println("=====================================");
-//  Serial.println();
+  Serial.print("Heating monitor:");
+  rf12_configDump();
+  Serial.println();
+  Serial.flush();
+/*
   pinMode(17, OUTPUT);      // Set the pin, AIO4 - Power the DS18B20's
   digitalWrite(17, HIGH);   // Power up the DS18B20's
-/*  
+  
 /// Configure the DS20B18 ///
   ds.reset();               // Set for 9 bit measurements //
   ds.skip();                // Next command to all devices
@@ -125,57 +131,126 @@ void setup () {
 */
   }
 void loop () {
-    digitalWrite(17, HIGH);   // Power up the DS18B20's
+byte needOff  = false;
+/*
+ * Setup to receive Salus transmissions
+ */
+    rf12_initialize (SALUSID, RF12_868MHZ, 212, 1652);            // 868.260khz
+    Serial.println("Init Done");
+    delay(1000);
+//    rf12_sleep(RF12_SLEEP);                                       // Sleep while we tweak things
+#if RF69_COMPAT
+    RF69::control(REG_BITRATEMSB | 0x80, 0x34);                   // 2.4kbps
+    RF69::control(REG_BITRATELSB | 0x80, 0x15);
+    RF69::control(REG_BITFDEVMSB | 0x80, 0x04);                   // 75kHz freq shift
+    RF69::control(REG_BITFDEVLSB | 0x80, 0xCE);
+#else
+    rf12_control(0xC040);                                         // set low-battery level to 2.2V
+    rf12_control(RF12_DATA_RATE_2);                               // 2.4kbps
+    rf12_control(0x9840);                                         // 75khz freq shift
+#endif
+    for (byte i = 0; i++; i < 100) {                               // Loop for about 1 minute
+        rf12_sleep(RF12_WAKEUP);                                  // All set, wake up radio
+        Serial.flush();
+        delay(1000);
+        Sleepy::idleSomeTime(30);                                  // Wait for an interrupt, 50% duty cycle
+        if ((rf12_recvDone()) && (rf12_buf[0] == 212 && (rf12_buf[1] | rf12_buf[2]) == rf12_buf[3] 
+          && rf12_buf[4] == 90 && rf12_buf[1] == SALUSID)) {
+            // It is a packet from our Salus thermostat!
+            salusMillis = millis() + (21 * 60 * 1000ul);          // 21 mins hence 
+            rf12_sleep(RF12_SLEEP);
+            Serial.print("Salus: ");
+            Serial.print(rf12_buf[1]);
+            Serial.print(",");
+            Serial.println(rf12_buf[2], HEX);
+            Serial.flush();
+
+            payload.salusCommand = rf12_buf[2];   
+            break;
+        } else {
+              Serial.println("Not Salus");
+              Serial.flush();
+              delay(1000);
+//            rf12_sleep(RF12_SLEEP);                               // Sleep the radio
+            delay(1000);
+            Sleepy::idleSomeTime(30);                            // wait with radio off, 50% duty cycle
+        }
+    }
+    if ((millis() > salusMillis) || needOff) {                    // Is a Salus Off required?
+        needOff = false;
+        rf12_sleep(RF12_WAKEUP);
+        while (!rf12_canSend())
+        rf12_recvDone();
+        rf12_skip_hdr();                                          // Omit Jeelib header 2 bytes on transmission
+        rf12_sendStart(0, &salusOff, sizeof salusOff);            // Transmit the Salus command
+        rf12_sendWait(1);                                         // Wait for transmission complete
+        rf12_sleep(RF12_SLEEP);                                   // Sleep the radio
+        payload.salusCommand = OFF;                               // Update the Jee world status
+    }
+    /*
+    digitalWrite(17, HIGH);                                       // Power up the DS18B20's
     ds.reset();
-    ds.skip();              // Next command to all devices
-    ds.write(0x44);         // Start all temperature conversions.
-    Sleepy::loseSomeTime(100); // Wait for the data
-// delay(100);
-// 
+    ds.skip();                                                    // Next command to all devices
+    ds.write(0x44);                                               // Start all temperature conversions.
+    Sleepy::loseSomeTime(100);                                    // Wait for the data to be available
+
     ds.reset();
     ds.select(ColdFeed);    
-    ds.write(0xBE);         // Read Scratchpad
+    ds.write(0xBE);                                               // Read Scratchpad
     payload.ColdFeed = getTemp();
     Serial.println(payload.ColdFeed);
 
-// 
     ds.reset();
     ds.select(BoilerFeed);    
-    ds.write(0xBE);         // Read Scratchpad
+    ds.write(0xBE);                                               // Read Scratchpad
     payload.BoilerFeed = getTemp();
     Serial.println(payload.BoilerFeed);
-// 
+
     ds.reset();
     ds.select(CentralHeatingReturn);    
-    ds.write(0xBE);         // Read Scratchpad
+    ds.write(0xBE);                                               // Read Scratchpad
     payload.CentralHeatingReturn = getTemp();
     Serial.println(payload.CentralHeatingReturn);
-// 
+
     ds.reset();
     ds.select(TankCoilReturn);    
-    ds.write(0xBE);         // Read Scratchpad
+    ds.write(0xBE);                                               // Read Scratchpad
     payload.TankCoilReturn = getTemp();
     Serial.println(payload.TankCoilReturn);
-// 
+
     ds.reset();
     ds.select(HotFeed);    
-    ds.write(0xBE);         // Read Scratchpad
+    ds.write(0xBE);                                               // Read Scratchpad
     payload.HotFeed = getTemp();
+
+    digitalWrite(17, LOW);                                        // Power down the DS18B20's    
+    
     Serial.println(payload.HotFeed);
     Serial.println();
     Serial.flush();
-
+*/
+    if ((payload.TankCoilReturn + 2) > payload.BoilerFeed) needOff = true;
+    
     payload.count++;
-
-    rf12_sleep(RF12_WAKEUP);
-    while (!rf12_canSend())
-    rf12_recvDone();
-    rf12_sendStart(0, &payload, sizeof payload);
-    rf12_sendWait(2);
-    rf12_sleep(RF12_SLEEP); 
-    digitalWrite(17, LOW);   // Power down the DS18B20's
-//    delay(6000);   
-    Sleepy::loseSomeTime(60000);
-
-}
+    if (rf12_configSilent()) {
+        Serial.println("Set for Jeenode");
+        delay(1000);
+//        rf12_control(0xC040);                                     // set low-battery level to 2.2V i.s.o. 3.1V
+        rf12_sleep(RF12_WAKEUP);
+        while (!rf12_canSend())
+        rf12_recvDone();
+        Serial.println("Sending to JeeNode");
+        delay(1000);
+        rf12_sendStart(0, &payload, sizeof payload);
+        rf12_sendWait(2);
+        rf12_sleep(RF12_SLEEP); 
+    } else {
+          while( true ){
+            rf12_sleep(RF12_SLEEP);
+            Serial.println("RF12 eeprom not valid, run RF12Demo");
+            Serial.flush();
+            Sleepy::idleSomeTime(60);
+          }  
+    }
+} // Loop
 
