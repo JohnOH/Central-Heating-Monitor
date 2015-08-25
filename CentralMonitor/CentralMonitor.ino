@@ -42,6 +42,9 @@ OneWire  ds(PD7); // DIO4
  * schedule then this sketch should cancel the central heating demand.
  */
 
+unsigned long salusMillis;
+unsigned long salusTimeout = 21 * 60 * 1000ul;
+unsigned int loopCount;
 byte ColdFeed[8] = {0x28,0x9E,0x77,0x37,0x03,0x00,0x00,0xAA};
 byte BoilerFeed[8] = {0x28,0x86,0x39,0x4E,0x04,0x00,0x00,0x5A};
 byte CentralHeatingReturn[8] = {0x28,0x7F,0xCA,0x4D,0x4,0x0,0x0,0xDE};
@@ -49,8 +52,6 @@ byte TankCoilReturn[8] = {0x28,0x7F,0xC6,0x4D,0x04,0x00,0x00,0xFF};
 byte HotFeed[8] = {0x28,0x53,0x4F,0x4E,0x04,0x00,0x00,0x84};
 
 byte addr[8];
-unsigned long salusMillis;
-unsigned long salusTimeout = 21 * 60 * 1000ul;
 byte needOff  = false;
 byte salusOff[] = {SALUSID, OFF, SALUSID | OFF, 90};
 byte elapsed = 0;
@@ -59,7 +60,8 @@ ISR(WDT_vect) { Sleepy::watchdogEvent(); }
 //
 /////////////////////////////////////////////////////////////////////////////////////
 struct payload{                                                                    //
-byte count; // packet count
+byte count: 4;        // packet count
+byte retries: 4;      // transmission attempts
 byte salusCommand;
 unsigned ColdFeed;
 unsigned int BoilerFeed;
@@ -109,6 +111,43 @@ unsigned int getTemp(void)
 // 28 F3 D1 4D 4 00 00 45
 // 28 C9 C5 4D 4 00 00 04
 //////////////////////////
+
+// wait a few milliseconds for proper ACK to me, return true if indeed received
+#define ACK_TIME        20  // number of milliseconds to wait for an ack
+#define RETRY_LIMIT      7
+#define RADIO_SYNC_MODE 2
+byte NodeID;
+static byte sendACK() {  // Assumed running at full speed!
+  for (byte t = 1; t < RETRY_LIMIT+1; t++) {  
+      rf12_sleep(RF12_WAKEUP);
+      rf12_recvDone();
+      while (!rf12_canSend())
+      rf12_recvDone();
+      rf12_sendStart(RF12_HDR_ACK, &payload, sizeof payload/*, RADIO_SYNC_MODE*/);
+      byte acked = waitForAck();
+//      rf12_sendWait(1);
+      rf12_sleep(RF12_SLEEP);
+        if (acked) {
+          return t;
+        } 
+     }
+     return 0; 
+  }
+
+// wait a few milliseconds for proper ACK to me, return true if indeed received
+static byte waitForAck() {
+    MilliTimer ackTimer;
+    while (!ackTimer.poll(ACK_TIME)) {
+        if (rf12_recvDone() && rf12_crc == 0 &&
+                // see http://talk.jeelabs.net/topic/811#post-4712
+                rf12_hdr == (RF12_HDR_DST | RF12_HDR_CTL | NodeID))
+            return 1;
+        set_sleep_mode(SLEEP_MODE_IDLE);   // Wait a while for  the reply?
+        sleep_mode();
+    }
+    return 0;
+}
+
 void setup () {
   delay(100);          // Delay on startup to avoid ISP/RFM12B interference.
   Serial.begin(57600);
@@ -153,15 +192,14 @@ void loop () {
     rf12_control(RF12_DATA_RATE_2);                               // 2.4kbps
     rf12_control(0x9840);                                         // 75khz freq shift
 #endif
-//    Sleepy::loseSomeTime(20);
+
 /*
     delay(10);
         Serial.println(RF69::interruptCount);
     delay(100);
 
-
-    rf12_sleep(RF12_WAKEUP);                                      // All set, wake up radio
-*/    
+*/
+    rf12_sleep(RF12_WAKEUP);                                      // All set, wake up radio    
     rf12_recvDone();
  //   delay(10);
  //       Serial.println((RF69::control(0x28, 0)), HEX); // Prints out Register value
@@ -247,15 +285,15 @@ void loop () {
         if ((payload.TankCoilReturn + 2) > payload.BoilerFeed) needOff = true;
     
         payload.count++;
-        if (rf12_configSilent()) {
-            rf12_sleep(RF12_WAKEUP);
-            while (!rf12_canSend())
-            rf12_recvDone();
-            Serial.print(elapsed);
-            Serial.println(" Sending to JeeNode");
-            rf12_sendStart(0, &payload, sizeof payload);
-            rf12_sendWait(1);
-            rf12_sleep(RF12_SLEEP);
+        if (NodeID = rf12_configSilent()) {
+            Serial.print("Node ");
+            Serial.print(NodeID);
+            Serial.print(" sending to JeeNet #");
+            Serial.print(payload.count);
+            payload.retries = sendACK();
+            Serial.print(" attempts:");
+            Serial.println(payload.retries);
+            Serial.flush();
         } else {
               while( true ){
                 rf12_sleep(RF12_SLEEP);
@@ -266,5 +304,7 @@ void loop () {
         }
         elapsed = 0; 
     }
+    Serial.print("Loop ");
+    Serial.println(++loopCount);
 } // Loop
 
