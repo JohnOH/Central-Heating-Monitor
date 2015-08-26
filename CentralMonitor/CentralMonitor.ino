@@ -60,9 +60,10 @@ ISR(WDT_vect) { Sleepy::watchdogEvent(); }
 //
 /////////////////////////////////////////////////////////////////////////////////////
 struct payload{                                                                    //
+byte attempt: 4;      // transmission attempts
 byte count: 4;        // packet count
-byte retries: 4;      // transmission attempts
-byte salusCommand;
+byte salusAddr;       // Address byte
+byte salusCommand;    // Command byte
 unsigned ColdFeed;
 unsigned int BoilerFeed;
 unsigned int CentralHeatingReturn;
@@ -118,20 +119,23 @@ unsigned int getTemp(void)
 #define RADIO_SYNC_MODE 2
 byte NodeID;
 static byte sendACK() {  // Assumed running at full speed!
+  // DEBUG
+  rf12_sleep(RF12_WAKEUP);
+  rf12_recvDone();
+
   for (byte t = 1; t < RETRY_LIMIT+1; t++) {  
-      rf12_sleep(RF12_WAKEUP);
-      rf12_recvDone();
+//      rf12_sleep(RF12_WAKEUP);
+  //    rf12_recvDone();
       while (!rf12_canSend())
       rf12_recvDone();
       rf12_sendStart(RF12_HDR_ACK, &payload, sizeof payload/*, RADIO_SYNC_MODE*/);
       byte acked = waitForAck();
 //      rf12_sendWait(1);
-      rf12_sleep(RF12_SLEEP);
+//      rf12_sleep(RF12_SLEEP);
         if (acked) {
           return t;
         } 
      }
-     return 0; 
   }
 
 // wait a few milliseconds for proper ACK to me, return true if indeed received
@@ -142,21 +146,31 @@ static byte waitForAck() {
                 // see http://talk.jeelabs.net/topic/811#post-4712
                 rf12_hdr == (RF12_HDR_DST | RF12_HDR_CTL | NodeID))
             return 1;
-        set_sleep_mode(SLEEP_MODE_IDLE);   // Wait a while for  the reply?
-        sleep_mode();
+ //       set_sleep_mode(SLEEP_MODE_IDLE);   // Wait a while for the reply?
+ //       sleep_mode();
     }
     return 0;
 }
 
 void setup () {
-  delay(100);          // Delay on startup to avoid ISP/RFM12B interference.
-  Serial.begin(57600);
-  Serial.print("Heating monitor:");
-  rf12_configDump();
-  Serial.flush();
-  payload.BoilerFeed = ~0;
-  payload.salusCommand = ON;
-  salusMillis = millis() + salusTimeout;
+    delay(10);          // Delay on startup to avoid ISP/RFM12B interference.
+    Serial.begin(57600);
+    Serial.print("Heating monitor:");
+    if (NodeID = rf12_configSilent()) { 
+        rf12_configDump();
+    } else {
+        while( true ) {
+            rf12_sleep(RF12_SLEEP);
+            Serial.println("RF12 eeprom not valid, run RF12Demo");
+            Serial.flush();
+            Sleepy::idleSomeTime(60);
+        }  
+    }
+        
+    Serial.flush();
+    payload.BoilerFeed = ~0;
+    payload.salusCommand = ON;
+    salusMillis = millis() + salusTimeout;
   
 /*
   pinMode(17, OUTPUT);      // Set the pin, AIO4 - Power the DS18B20's
@@ -178,19 +192,21 @@ void setup () {
   }
 void loop () {
 /*
- * Setup to receive Salus transmissions
+ * Setup to receive Salus transmissions @ 868.260khz
  */
-    rf12_initialize (SALUSID, RF12_868MHZ, 212, 1652);            // 868.260khz
-    rf12_sleep(RF12_SLEEP);                                       // Sleep while we tweak things
+
+//    rf12_sleep(RF12_SLEEP);                                           // Sleep while we tweak things
 #if RF69_COMPAT
-    RF69::control(REG_BITRATEMSB | 0x80, 0x34);                   // 2.4kbps
+//    RF69::setFrequency(86 * 10000000L + RF12_868MHZ * 2500L * 1652L); // Offset 1652 is 868.260khz
+    RF69::control(REG_BITRATEMSB | 0x80, 0x34);                       // 2.4kbps
     RF69::control(REG_BITRATELSB | 0x80, 0x15);
-    RF69::control(REG_BITFDEVMSB | 0x80, 0x04);                   // 75kHz freq shift
+    RF69::control(REG_BITFDEVMSB | 0x80, 0x04);                       // 75kHz freq shift
     RF69::control(REG_BITFDEVLSB | 0x80, 0xCE);
 #else
-    rf12_control(0xC040);                                         // set low-battery level to 2.2V
-    rf12_control(RF12_DATA_RATE_2);                               // 2.4kbps
-    rf12_control(0x9840);                                         // 75khz freq shift
+    TODO
+    rf12_control(0xC040);                                             // set low-battery level to 2.2V
+    rf12_control(RF12_DATA_RATE_2);                                   // 2.4kbps
+    rf12_control(0x9840);                                             // 75khz freq shift
 #endif
 
 /*
@@ -199,15 +215,16 @@ void loop () {
     delay(100);
 
 */
-    rf12_sleep(RF12_WAKEUP);                                      // All set, wake up radio    
+//    rf12_sleep(RF12_WAKEUP);                                          // All set, wake up radio    
+ //   sei();
     rf12_recvDone();
  //   delay(10);
  //       Serial.println((RF69::control(0x28, 0)), HEX); // Prints out Register value
  //       Serial.println(RF69::interruptCount);
- //   delay(100);
+    delay(1000);
 
     
-    elapsed = elapsed + (60 - (Sleepy::idleSomeTime(60)));        // Check temperatures every minute
+    elapsed = elapsed + (60 - (Sleepy::idleSomeTime(60)));            // Check temperatures every minute
 
     if ((rf12_recvDone()) && (rf12_buf[0] == 212 && ((rf12_buf[1] | rf12_buf[2]) == rf12_buf[3]) 
       && rf12_buf[4] == 90 && rf12_buf[1] == SALUSID)) {
@@ -222,6 +239,7 @@ void loop () {
         Serial.println(rf12_buf[2], HEX);
         Serial.flush();
         elapsed = ~0;                                             // Trigger a transmit
+        payload.salusAddr = rf12_buf[1];
         payload.salusCommand = rf12_buf[2];   
     }
 
@@ -283,25 +301,37 @@ void loop () {
         Serial.flush();
         */
         if ((payload.TankCoilReturn + 2) > payload.BoilerFeed) needOff = true;
-    
         payload.count++;
-        if (NodeID = rf12_configSilent()) {
-            Serial.print("Node ");
+        
+        rf12_sleep(RF12_WAKEUP);  // DEBUG
+        rf12_recvDone(); 
+               
+#if RF69_COMPAT
+        // Configure for Jeennode transmission
+        RF69::setFrequency(86 * 10000000L + RF12_868MHZ * 2500L * 1600);  // Offset 1600 is 868.000khz
+        RF69::control(REG_BITRATEMSB | 0x80, 0x02);                       // BitRateMsb, data rate = 49,261 khz
+        RF69::control(REG_BITRATELSB | 0x80, 0x8A);                       // BitRateLsb, divider = 32 MHz / 650 == 49,230 khz
+        RF69::control(REG_BITFDEVMSB | 0x80, 0x02);                       // FdevMsb = 45 KHz
+        RF69::control(REG_BITFDEVLSB | 0x80, 0xE1);                       // FdevLsb = 45 KHz
+#else
+        TODO
+        rf12_control(0xC040);                                             // set low-battery level to 2.2V
+        rf12_control(RF12_DATA_RATE_2);                                   // 2.4kbps
+        rf12_control(0x9840);                                             // 75khz freq shift
+#endif
+
+
+            Serial.print("At ");
+            Serial.print(millis());
+            Serial.print(" Node ");
             Serial.print(NodeID);
-            Serial.print(" sending to JeeNet #");
+            Serial.print(" sending packet #");
             Serial.print(payload.count);
-            payload.retries = sendACK();
-            Serial.print(" attempts:");
-            Serial.println(payload.retries);
             Serial.flush();
-        } else {
-              while( true ){
-                rf12_sleep(RF12_SLEEP);
-                Serial.println("RF12 eeprom not valid, run RF12Demo");
-                Serial.flush();
-                Sleepy::idleSomeTime(60);
-              }  
-        }
+            payload.attempt = sendACK();
+            Serial.print(", attempts:");
+            Serial.println(payload.attempt);
+            Serial.flush();
         elapsed = 0; 
     }
     Serial.print("Loop ");
