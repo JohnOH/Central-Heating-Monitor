@@ -192,7 +192,7 @@ void loop () {
     rf12_control(RF12_DATA_RATE_2);                               // 2.4kbps
     rf12_control(0x9840);                                         // 75khz freq shift
 #endif
-
+    Serial.flush();
 /*
     delay(10);
         Serial.println(RF69::interruptCount);
@@ -239,7 +239,7 @@ void loop () {
         rf12_sleep(RF12_SLEEP);                                   // Sleep the radio
         payload.salusCommand = OFF | 0x80;                        // Update the Jee world status
     }                                                             // 0x80 indicates Jeenode commanded off
-    if (elapsed >= 60) {
+//    if (elapsed >= 60) {
         /*
         digitalWrite(17, HIGH);                                       // Power up the DS18B20's
         ds.reset();
@@ -282,8 +282,8 @@ void loop () {
         Serial.println();
         Serial.flush();
         */
-        if ((payload.TankCoilReturn + 2) > payload.BoilerFeed) needOff = true;
-    
+//        if ((payload.TankCoilReturn + 2) > payload.BoilerFeed) needOff = true;
+/*    
         payload.count++;
         if (NodeID = rf12_configSilent()) {
             Serial.print("Node ");
@@ -303,8 +303,9 @@ void loop () {
               }  
         }
         elapsed = 0; 
-    }
+    }*/
     Serial.print("Loop ");
     Serial.println(++loopCount);
+    Serial.flush();
 } // Loop
 
