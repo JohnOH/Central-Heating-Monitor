@@ -70,48 +70,6 @@ unsigned int TankCoilReturn;
 unsigned int HotFeed;
 } payload;                                                                         //
 /////////////////////////////////////////////////////////////////////////////////////
-
-unsigned int getTemp(void)
-{
-  byte i;
-  byte present = 0;
-  byte data[12]; 
-  
-//  Serial.print("  Data = ");
-//  Serial.print(present,HEX);
-//  Serial.print(" ");
-
-  for ( i = 0; i < 9; i++) {           // we need 9 bytes
-    data[i] = ds.read();
-//    Serial.print(data[i], HEX);
-//    Serial.print(" ");
-  }
-//  Serial.print(" CRC=");
-//  Serial.print(OneWire::crc8(data, 8), HEX);
- // Serial.println();
-
-  // convert the data to actual temperature
-
-  int raw = (data[1] << 8) | data[0];
-//  raw = raw << 3; // 9 bit resolution default
-  raw = raw * 10;
-  raw = raw >> 4;
-  return (raw); // return t*10
-//  return ((data[1] << 8) + data[0]); // return t*16
-}
-// Ten off wired DS18B20 from Alibaba
-// 28 7F C6 4D 4 00 00 FF Tank Coil
-// 28 7F CA 4D 4 00 00 DE Central Heating Return
-// 28 53 4F 4E 4 00 00 84 Tank Stat
-// 28 E8 AC 4E 4 00 00 EF
-// 28 26 E6 4D 4 00 00 BF
-// 28 86 39 4E 4 00 00 5A Boiler Feed
-// 28 A0 68 4E 4 00 00 06
-// 28 4E D3 4D 4 00 00 8B
-// 28 F3 D1 4D 4 00 00 45
-// 28 C9 C5 4D 4 00 00 04
-//////////////////////////
-
 // wait a few milliseconds for proper ACK to me, return true if indeed received
 #define ACK_TIME        20  // number of milliseconds to wait for an ack
 #define RETRY_LIMIT      7
@@ -158,23 +116,6 @@ void setup () {
   payload.salusCommand = ON;
   salusMillis = millis() + salusTimeout;
   
-/*
-  pinMode(17, OUTPUT);      // Set the pin, AIO4 - Power the DS18B20's
-  digitalWrite(17, HIGH);   // Power up the DS18B20's
-  
-/// Configure the DS20B18 ///
-  ds.reset();               // Set for 9 bit measurements //
-  ds.skip();                // Next command to all devices
-  ds.write(0x4E);           // Write to Scratch Pad
-  ds.write(0x7F);           // Set T(h)
-  ds.write(0x80);           // Set T(l)
-  ds.write(0x1F);           // Set Config
-/// Copy config to on-chip EEProm
-  ds.reset();               // Set for 9 bit measurements //
-  ds.skip();                // Next command to all devices
-  ds.write(0x48);           // Set Config
-  delay(10);                // Wait for copy to complete
-*/
   }
 void loop () {
 /*
@@ -224,86 +165,6 @@ void loop () {
         elapsed = ~0;                                             // Trigger a transmit
         payload.salusCommand = rf12_buf[2];   
     }
-
-    if (((millis() > salusMillis) || needOff)) {                  // Is a Salus Off required?
-        needOff = false;
-        salusMillis = millis() + salusTimeout;
-        Serial.print(elapsed);
-        Serial.println(" Sending Salus off");
-        rf12_sleep(RF12_WAKEUP);
-        rf12_recvDone();
-//        while (!rf12_canSend())
-        rf12_skip_hdr();                                          // Omit Jeelib header 2 bytes on transmission
-        rf12_sendStart(0, &salusOff, 4);                          // Transmit the Salus off command
-        rf12_sendWait(1);                                         // Wait for transmission complete
-        rf12_sleep(RF12_SLEEP);                                   // Sleep the radio
-        payload.salusCommand = OFF | 0x80;                        // Update the Jee world status
-    }                                                             // 0x80 indicates Jeenode commanded off
-//    if (elapsed >= 60) {
-        /*
-        digitalWrite(17, HIGH);                                       // Power up the DS18B20's
-        ds.reset();
-        ds.skip();                                                    // Next command to all devices
-        ds.write(0x44);                                               // Start all temperature conversions.
-        Sleepy::loseSomeTime(100);                                    // Wait for the data to be available
-
-        ds.reset();
-        ds.select(ColdFeed);    
-        ds.write(0xBE);                                               // Read Scratchpad
-        payload.ColdFeed = getTemp();
-        Serial.println(payload.ColdFeed);
-
-        ds.reset();
-        ds.select(BoilerFeed);    
-        ds.write(0xBE);                                               // Read Scratchpad
-        payload.BoilerFeed = getTemp();
-        Serial.println(payload.BoilerFeed);
-
-        ds.reset();
-        ds.select(CentralHeatingReturn);    
-        ds.write(0xBE);                                               // Read Scratchpad
-        payload.CentralHeatingReturn = getTemp();
-        Serial.println(payload.CentralHeatingReturn);
-
-        ds.reset();
-        ds.select(TankCoilReturn);    
-        ds.write(0xBE);                                               // Read Scratchpad
-        payload.TankCoilReturn = getTemp();
-        Serial.println(payload.TankCoilReturn);
-
-        ds.reset();
-        ds.select(HotFeed);    
-        ds.write(0xBE);                                               // Read Scratchpad
-        payload.HotFeed = getTemp();
-
-        digitalWrite(17, LOW);                                        // Power down the DS18B20's    
-    
-        Serial.println(payload.HotFeed);
-        Serial.println();
-        Serial.flush();
-        */
-//        if ((payload.TankCoilReturn + 2) > payload.BoilerFeed) needOff = true;
-/*    
-        payload.count++;
-        if (NodeID = rf12_configSilent()) {
-            Serial.print("Node ");
-            Serial.print(NodeID);
-            Serial.print(" sending to JeeNet #");
-            Serial.print(payload.count);
-            payload.retries = sendACK();
-            Serial.print(" attempts:");
-            Serial.println(payload.retries);
-            Serial.flush();
-        } else {
-              while( true ){
-                rf12_sleep(RF12_SLEEP);
-                Serial.println("RF12 eeprom not valid, run RF12Demo");
-                Serial.flush();
-                Sleepy::idleSomeTime(60);
-              }  
-        }
-        elapsed = 0; 
-    }*/
     Serial.print("Loop ");
     Serial.println(++loopCount);
     Serial.flush();
