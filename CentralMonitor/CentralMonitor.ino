@@ -10,6 +10,8 @@
 #define SALUSID 16
 #define ON  1
 #define OFF 2
+#define TEMPCHECK 60         // Check the temperatures each minute
+
 #define REG_BITRATEMSB 0x03  // RFM69 only, 0x02, // BitRateMsb, data rate = 49,261 khz
 #define REG_BITRATELSB 0x04  // RFM69 only, 0x8A, // BitRateLsb divider = 32 MHz / 650 == 49,230 khz
 #define REG_BITFDEVMSB 0x05  // RFM69 only, 0x02, // FdevMsb = 45 KHz
@@ -60,8 +62,8 @@ ISR(WDT_vect) { Sleepy::watchdogEvent(); }
 //
 /////////////////////////////////////////////////////////////////////////////////////
 struct payload{                                                                    //
-byte count: 4;        // packet count
 byte attempts: 4;     // transmission attempts
+byte count: 4;        // packet count
 byte salusAddress;
 byte salusCommand;
 unsigned ColdFeed;
@@ -113,17 +115,17 @@ unsigned int getTemp(void)
 // 28 C9 C5 4D 4 00 00 04
 //////////////////////////
 
-#define ACK_TIME        50  // number of milliseconds to wait for an ack
-#define RETRY_LIMIT      5
-byte NodeID;
+#define ACK_TIME        20  // number of milliseconds - 1 to wait for an ack
+#define RETRY_LIMIT      7
+byte NodeID = 31;
 
 static byte sendACK() {
-  for (byte t = 1; t < RETRY_LIMIT+1; t++) {  
+  for (byte t = 1; t <= RETRY_LIMIT; t++) {  
       rf12_sleep(RF12_WAKEUP);
 //      while (!rf12_canSend())
       payload.attempts = t;
       rf12_sendStart(RF12_HDR_ACK, &payload, sizeof payload);
-      byte acked = waitForAck();
+      byte acked = waitForAck(t * t);
       rf12_sleep(RF12_SLEEP);
         if (acked) {
           return t;
@@ -134,16 +136,15 @@ static byte sendACK() {
      }
      return 0; 
   }
-static byte waitForAck() {
+static byte waitForAck(byte t) {
     MilliTimer ackTimer;
-    while (!ackTimer.poll(ACK_TIME)) {
+    while (!ackTimer.poll(ACK_TIME + t)) {
         if (rf12_recvDone() && rf12_crc == 0 &&
                 // see http://talk.jeelabs.net/topic/811#post-4712
                 rf12_hdr == (RF12_HDR_DST | RF12_HDR_CTL | NodeID))
             return 1;
-        Sleepy::idleSomeTime(1);
-//        set_sleep_mode(SLEEP_MODE_IDLE);   // Wait a while for the reply?
-  //      sleep_mode();
+        set_sleep_mode(SLEEP_MODE_IDLE);   // Wait a while for the reply?
+        sleep_mode();
     }
     return 0;
 }
@@ -155,7 +156,8 @@ void setup () {
   rf12_configDump();
   Serial.flush();
   payload.BoilerFeed = ~0;
-  payload.salusCommand = ON;
+  payload.salusAddress = ~0;          // Until we know better
+  payload.salusCommand = ON;          // ditto
   salusMillis = millis() + salusTimeout;
   
 /*
@@ -193,21 +195,8 @@ void loop () {
 #endif
     rf12_recvDone();                                              // Enter receive mode
 
-/*
-    delay(10);
-        Serial.println(RF69::interruptCount);
-    delay(100);
-
-*/
-//    rf12_sleep(RF12_WAKEUP);                                      // All set, wake up radio    
- //   delay(10);
- //       Serial.println((RF69::control(0x28, 0)), HEX); // Prints out Register value
- //       Serial.println(RF69::interruptCount);
- //   delay(100);
-
-    
-    elapsed = elapsed + (60 - (Sleepy::idleSomeTime(60)));        // Check temperatures every minute
-
+    elapsed = elapsed + (TEMPCHECK - (Sleepy::idleSomeTime(TEMPCHECK)));        // Check temperatures every minute
+  
     if ((rf12_recvDone()) && (rf12_buf[0] == 212 && ((rf12_buf[1] | rf12_buf[2]) == rf12_buf[3]) 
       && rf12_buf[4] == 90/* && rf12_buf[1] == SALUSID*/)) {      // Capture all Salus packets
         salusMillis = millis() + salusTimeout;
@@ -235,9 +224,10 @@ void loop () {
         rf12_sendStart(0, &salusOff, 4);                          // Transmit the Salus off command
         rf12_sendWait(1);                                         // Wait for transmission complete
         rf12_sleep(RF12_SLEEP);                                   // Sleep the radio
+        payload.salusAddress = 0;                                 // Note the prolonged loss of contact
         payload.salusCommand = OFF | 0x80;                        // Update the Jee world status
     }                                                             // 0x80 indicates Jeenode commanded off
-    if (elapsed >= 60) {
+    if (elapsed >= TEMPCHECK) {
         /*
         digitalWrite(17, HIGH);                                       // Power up the DS18B20's
         ds.reset();
@@ -289,6 +279,7 @@ void loop () {
             Serial.print(" sending to JeeNet #");
             Serial.print(payload.count);
             Serial.print(" ");
+            Serial.flush();
             
             payload.attempts = sendACK();
             
