@@ -95,7 +95,7 @@ void loop () {
  //       Serial.println(RF69::interruptCount);
  //   delay(100);
 
-    // The idleSomeTime code disables millis() to quite down interrupts
+    // The idleSomeTime code disables millis() to quiet down interrupts
     // Interrupts are still enabled and a packet arrival will wake us up.
     elapsed = elapsed + (60 - (Sleepy::idleSomeTime(60)));        // Check temperatures every minute
 
@@ -107,7 +107,6 @@ void loop () {
             // It is a packet from our Salus thermostat!
             salusMillis = millis() + salusTimeout;
  //           rf12_sleep(RF12_SLEEP);
-            Sleepy::loseSomeTime(50 * 29);                            // wait for the redundant packets to pass us by
             Serial.print(elapsed);
             Serial.print(" Salus: ");
             Serial.print(rf12_buf[1]);
@@ -116,6 +115,7 @@ void loop () {
             Serial.flush();
             elapsed = ~0;                                             // Trigger a transmit
             payload.salusCommand = rf12_buf[2]; 
+            Sleepy::loseSomeTime(50 * 29);  // Salus sends 30 packets 50ms apart, wait for the redundant packets to pass us by.
           }  
     }
     Serial.print("Loop ");
