@@ -75,7 +75,10 @@ void loop () {
     rf12_control(RF12_DATA_RATE_2);                               // 2.4kbps
     rf12_control(0x9840);                                         // 75khz freq shift
 #endif
-    delay(2500);
+    rf12_recvDone();                                              // Enable receiver
+//    rf12_sleep(RF12_SLEEP);                                       // Sleep while we tweak things
+    
+//    delay(2500);
     Serial.println("Starting");
     Serial.flush();
 /*
@@ -86,10 +89,6 @@ void loop () {
 */
 //    rf12_sleep(RF12_WAKEUP);                                      // All set, wake up radio    
 
-
-    rf12_recvDone();    // Without this we never receive anything at all
-
-    
  //   delay(10);
  //       Serial.println((RF69::control(0x28, 0)), HEX); // Prints out Register value
  //       Serial.println(RF69::interruptCount);
@@ -106,7 +105,7 @@ void loop () {
           && rf12_buf[4] == 90 && rf12_buf[1] == SALUSID)) {
             // It is a packet from our Salus thermostat!
             salusMillis = millis() + salusTimeout;
- //           rf12_sleep(RF12_SLEEP);
+//            rf12_sleep(RF12_SLEEP);
             Serial.print(elapsed);
             Serial.print(" Salus: ");
             Serial.print(rf12_buf[1]);
