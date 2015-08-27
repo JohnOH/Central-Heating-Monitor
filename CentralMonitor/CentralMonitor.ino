@@ -15,32 +15,6 @@
 #define REG_BITFDEVMSB 0x05  // RFM69 only, 0x02, // FdevMsb = 45 KHz
 #define REG_BITFDEVLSB 0x06  // RFM69 only, 0xE1, // FdevLsb = 45 KHz
 
-OneWire  ds(PD7); // DIO4
-/*
- * This code monitors dimensions of a home heating system and exercises
- * some limited control. A design imperative is for any Jee equipment to
- * fail soft with the more typical central heating controls continuing to  
- * manage the heating system while the features may not operational.
- * We assume that a Salus thermostat is controlling the heating demand.
- * When doing nothing else we monitor for RF Salus thermostat commands
- * and retransmit them in RF12 format to the data collection server.
- * The Salus equipment has direct control of the heating demand but
- * this Jeenode is able to send Salus commands, typically OFF commands
- * to optimise heating performance and gas consumption.
- * 
- * In addition to the above various temperatures around the heating system 
- * will be collected as below. Where the central heating return approaches 
- * the boiler feed temperature a Salus command will be issued to cancel
- * the central heating demand. This temperature difference is where the tuning
- * of gas consumption may be acheived. 
- * It should be noted that the Salus thermostat will repeat its instructions 
- * to the boiler based on temperature and every 10 minutes. If this sketch
- * cancels the heating demand the demand will be reasserted by the thermostat if 
- * conditions dictate.
- * 
- * If the Salus thermostat fails to deliver its demand status on its regular
- * schedule then this sketch should cancel the central heating demand.
- */
 
 unsigned long salusMillis;
 unsigned long salusTimeout = 21 * 60 * 1000ul;
@@ -73,38 +47,6 @@ unsigned int HotFeed;
 // wait a few milliseconds for proper ACK to me, return true if indeed received
 #define ACK_TIME        20  // number of milliseconds to wait for an ack
 #define RETRY_LIMIT      7
-#define RADIO_SYNC_MODE 2
-byte NodeID;
-static byte sendACK() {  // Assumed running at full speed!
-  for (byte t = 1; t < RETRY_LIMIT+1; t++) {  
-      rf12_sleep(RF12_WAKEUP);
-      rf12_recvDone();
-      while (!rf12_canSend())
-      rf12_recvDone();
-      rf12_sendStart(RF12_HDR_ACK, &payload, sizeof payload/*, RADIO_SYNC_MODE*/);
-      byte acked = waitForAck();
-//      rf12_sendWait(1);
-      rf12_sleep(RF12_SLEEP);
-        if (acked) {
-          return t;
-        } 
-     }
-     return 0; 
-  }
-
-// wait a few milliseconds for proper ACK to me, return true if indeed received
-static byte waitForAck() {
-    MilliTimer ackTimer;
-    while (!ackTimer.poll(ACK_TIME)) {
-        if (rf12_recvDone() && rf12_crc == 0 &&
-                // see http://talk.jeelabs.net/topic/811#post-4712
-                rf12_hdr == (RF12_HDR_DST | RF12_HDR_CTL | NodeID))
-            return 1;
-        set_sleep_mode(SLEEP_MODE_IDLE);   // Wait a while for  the reply?
-        sleep_mode();
-    }
-    return 0;
-}
 
 void setup () {
   delay(100);          // Delay on startup to avoid ISP/RFM12B interference.
@@ -122,7 +64,7 @@ void loop () {
  * Setup to receive Salus transmissions
  */
     rf12_initialize (SALUSID, RF12_868MHZ, 212, 1652);            // 868.260khz
-    rf12_sleep(RF12_SLEEP);                                       // Sleep while we tweak things
+//    rf12_sleep(RF12_SLEEP);                                       // Sleep while we tweak things
 #if RF69_COMPAT
     RF69::control(REG_BITRATEMSB | 0x80, 0x34);                   // 2.4kbps
     RF69::control(REG_BITRATELSB | 0x80, 0x15);
@@ -133,6 +75,8 @@ void loop () {
     rf12_control(RF12_DATA_RATE_2);                               // 2.4kbps
     rf12_control(0x9840);                                         // 75khz freq shift
 #endif
+    delay(2500);
+    Serial.println("Starting");
     Serial.flush();
 /*
     delay(10);
@@ -140,30 +84,39 @@ void loop () {
     delay(100);
 
 */
-    rf12_sleep(RF12_WAKEUP);                                      // All set, wake up radio    
-    rf12_recvDone();
+//    rf12_sleep(RF12_WAKEUP);                                      // All set, wake up radio    
+
+
+    rf12_recvDone();    // Without this we never receive anything at all
+
+    
  //   delay(10);
  //       Serial.println((RF69::control(0x28, 0)), HEX); // Prints out Register value
  //       Serial.println(RF69::interruptCount);
  //   delay(100);
 
-    
+    // The idleSomeTime code disables millis() to quite down interrupts
+    // Interrupts are still enabled and a packet arrival will wake us up.
     elapsed = elapsed + (60 - (Sleepy::idleSomeTime(60)));        // Check temperatures every minute
 
-    if ((rf12_recvDone()) && (rf12_buf[0] == 212 && ((rf12_buf[1] | rf12_buf[2]) == rf12_buf[3]) 
-      && rf12_buf[4] == 90 && rf12_buf[1] == SALUSID)) {
-        // It is a packet from our Salus thermostat!
-        salusMillis = millis() + salusTimeout;
-        rf12_sleep(RF12_SLEEP);
-        Sleepy::loseSomeTime(50 * 29);                            // wait for the redundant packets to pass us by
-        Serial.print(elapsed);
-        Serial.print(" Salus: ");
-        Serial.print(rf12_buf[1]);
-        Serial.print(",");
-        Serial.println(rf12_buf[2], HEX);
+    if (rf12_recvDone()) {
+        Serial.println(RF69::interruptCount);
         Serial.flush();
-        elapsed = ~0;                                             // Trigger a transmit
-        payload.salusCommand = rf12_buf[2];   
+        if ((rf12_buf[0] == 212 && ((rf12_buf[1] | rf12_buf[2]) == rf12_buf[3]) // Split into two if's no joy
+          && rf12_buf[4] == 90 && rf12_buf[1] == SALUSID)) {
+            // It is a packet from our Salus thermostat!
+            salusMillis = millis() + salusTimeout;
+ //           rf12_sleep(RF12_SLEEP);
+            Sleepy::loseSomeTime(50 * 29);                            // wait for the redundant packets to pass us by
+            Serial.print(elapsed);
+            Serial.print(" Salus: ");
+            Serial.print(rf12_buf[1]);
+            Serial.print(",");
+            Serial.println(rf12_buf[2], HEX);
+            Serial.flush();
+            elapsed = ~0;                                             // Trigger a transmit
+            payload.salusCommand = rf12_buf[2]; 
+          }  
     }
     Serial.print("Loop ");
     Serial.println(++loopCount);
