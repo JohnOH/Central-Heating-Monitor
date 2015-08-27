@@ -119,14 +119,14 @@ unsigned int getTemp(void)
 byte NodeID;
 static byte sendACK() {  // Assumed running at full speed!
   for (byte t = 1; t < RETRY_LIMIT+1; t++) {  
- //     rf12_sleep(RF12_WAKEUP);
+      rf12_sleep(RF12_WAKEUP);
       rf12_recvDone();
       while (!rf12_canSend())
       rf12_recvDone();
       rf12_sendStart(RF12_HDR_ACK, &payload, sizeof payload/*, RADIO_SYNC_MODE*/);
       byte acked = waitForAck();
 //      rf12_sendWait(1);
-//      rf12_sleep(RF12_SLEEP);
+      rf12_sleep(RF12_SLEEP);
         if (acked) {
           return t;
         } 
@@ -157,23 +157,6 @@ void setup () {
   payload.BoilerFeed = ~0;
   payload.salusCommand = ON;
   salusMillis = millis() + salusTimeout;
-
-    Serial.print("Init: ");
-    Serial.println(rf12_initialize (SALUSID, RF12_868MHZ, 212, 1652));            // 868.260khz
-    delay(50);
-    rf12_recvDone();    // Clear the block?
-//    rf12_sleep(RF12_SLEEP);                                       // Sleep while we tweak things
-#if RF69_COMPAT
-    RF69::control(REG_BITRATEMSB | 0x80, 0x34);                   // 2.4kbps
-    RF69::control(REG_BITRATELSB | 0x80, 0x15);
-    RF69::control(REG_BITFDEVMSB | 0x80, 0x04);                   // 75kHz freq shift
-    RF69::control(REG_BITFDEVLSB | 0x80, 0xCE);
-#else
-    rf12_control(0xC040);                                         // set low-battery level to 2.2V
-    rf12_control(RF12_DATA_RATE_2);                               // 2.4kbps
-    rf12_control(0x9840);                                         // 75khz freq shift
-#endif
-
   
 /*
   pinMode(17, OUTPUT);      // Set the pin, AIO4 - Power the DS18B20's
@@ -197,7 +180,19 @@ void loop () {
 /*
  * Setup to receive Salus transmissions
  */
-    Serial.flush();
+    rf12_initialize (SALUSID, RF12_868MHZ, 212, 1652);            // 868.260khz
+    rf12_sleep(RF12_SLEEP);                                       // Sleep while we tweak things
+#if RF69_COMPAT
+    RF69::control(REG_BITRATEMSB | 0x80, 0x34);                   // 2.4kbps
+    RF69::control(REG_BITRATELSB | 0x80, 0x15);
+    RF69::control(REG_BITFDEVMSB | 0x80, 0x04);                   // 75kHz freq shift
+    RF69::control(REG_BITFDEVLSB | 0x80, 0xCE);
+#else
+    rf12_control(0xC040);                                         // set low-battery level to 2.2V
+    rf12_control(RF12_DATA_RATE_2);                               // 2.4kbps
+    rf12_control(0x9840);                                         // 75khz freq shift
+#endif
+
 /*
     delay(10);
         Serial.println(RF69::interruptCount);
@@ -205,29 +200,20 @@ void loop () {
 
 */
     rf12_sleep(RF12_WAKEUP);                                      // All set, wake up radio    
-//    rf12_recvDone();
-        Serial.print("RF69 Interrupt Count 1: ");
-        Serial.println(RF69::interruptCount);
-        Serial.flush();
-
+    rf12_recvDone();
  //   delay(10);
  //       Serial.println((RF69::control(0x28, 0)), HEX); // Prints out Register value
+ //       Serial.println(RF69::interruptCount);
  //   delay(100);
 
-//    if(RF69::canSend()) Serial.println("True");
-//    Serial.flush();
     
     elapsed = elapsed + (60 - (Sleepy::idleSomeTime(60)));        // Check temperatures every minute
-
-        Serial.print("RF69 Interrupt Count 2: ");
-        Serial.println(RF69::interruptCount);
-        Serial.flush();
 
     if ((rf12_recvDone()) && (rf12_buf[0] == 212 && ((rf12_buf[1] | rf12_buf[2]) == rf12_buf[3]) 
       && rf12_buf[4] == 90 && rf12_buf[1] == SALUSID)) {
         // It is a packet from our Salus thermostat!
         salusMillis = millis() + salusTimeout;
-//        rf12_sleep(RF12_SLEEP);
+        rf12_sleep(RF12_SLEEP);
         Sleepy::loseSomeTime(50 * 29);                            // wait for the redundant packets to pass us by
         Serial.print(elapsed);
         Serial.print(" Salus: ");
@@ -244,16 +230,16 @@ void loop () {
         salusMillis = millis() + salusTimeout;
         Serial.print(elapsed);
         Serial.println(" Sending Salus off");
- //       rf12_sleep(RF12_WAKEUP);
+        rf12_sleep(RF12_WAKEUP);
         rf12_recvDone();
 //        while (!rf12_canSend())
         rf12_skip_hdr();                                          // Omit Jeelib header 2 bytes on transmission
         rf12_sendStart(0, &salusOff, 4);                          // Transmit the Salus off command
         rf12_sendWait(1);                                         // Wait for transmission complete
- //       rf12_sleep(RF12_SLEEP);                                   // Sleep the radio
+        rf12_sleep(RF12_SLEEP);                                   // Sleep the radio
         payload.salusCommand = OFF | 0x80;                        // Update the Jee world status
     }                                                             // 0x80 indicates Jeenode commanded off
-//    if (elapsed >= 60) {
+    if (elapsed >= 60) {
         /*
         digitalWrite(17, HIGH);                                       // Power up the DS18B20's
         ds.reset();
@@ -296,8 +282,8 @@ void loop () {
         Serial.println();
         Serial.flush();
         */
-//        if ((payload.TankCoilReturn + 2) > payload.BoilerFeed) needOff = true;
-/*    
+        if ((payload.TankCoilReturn + 2) > payload.BoilerFeed) needOff = true;
+    
         payload.count++;
         if (NodeID = rf12_configSilent()) {
             Serial.print("Node ");
@@ -317,9 +303,8 @@ void loop () {
               }  
         }
         elapsed = 0; 
-    }*/
+    }
     Serial.print("Loop ");
     Serial.println(++loopCount);
-    Serial.flush();
 } // Loop
 
