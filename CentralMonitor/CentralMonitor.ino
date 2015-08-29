@@ -8,7 +8,7 @@
 #include <OneWire.h>
 #define AIO2 9 // d9
 #define SALUSID 16
-#define SALUSFREQUENCY 1661 // JeeLink 69c (Red)
+#define SALUSFREQUENCY 1669 // JeeLink 69c (Red)
 #define ON  1
 #define OFF 2
 #define TEMPCHECK 60        // Check the temperatures each minute
@@ -46,7 +46,7 @@ OneWire  ds(PD7); // DIO4
  */
 
 unsigned long salusMillis;
-unsigned long salusTimeout = 21 * 60 * 1000ul;
+static unsigned long salusTimeout = 21 * 60 * 1000ul;
 unsigned int loopCount;
 byte ColdFeed[8] = {0x28,0x9E,0x77,0x37,0x03,0x00,0x00,0xAA};
 byte BoilerFeed[8] = {0x28,0x86,0x39,0x4E,0x04,0x00,0x00,0x5A};
@@ -55,7 +55,7 @@ byte TankCoilReturn[8] = {0x28,0x7F,0xC6,0x4D,0x04,0x00,0x00,0xFF};
 byte HotFeed[8] = {0x28,0x53,0x4F,0x4E,0x04,0x00,0x00,0x84};
 
 byte addr[8];
-byte needOff  = false;
+byte needOff = false;
 byte salusOff[] = {SALUSID, OFF, SALUSID | OFF, 90};
 byte elapsed = 0;
 
@@ -234,7 +234,7 @@ void loop () {
 #else
     rf12_control(0xC040);                                         // set low-battery level to 2.2V
     rf12_control(RF12_DATA_RATE_2);                               // 0xC691 app 2.4kbps
-    rf12_control(0x9840);                                         // 75khz freq shift
+    rf12_control(0x9830);                                         // 75khz freq shift
     rf12_sleep(RF12_WAKEUP);                                      // Wake up radio
 #endif
     rf12_recvDone();                                              // Enter receive mode
