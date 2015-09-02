@@ -1,5 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////////
-#define RF69_COMPAT      0   // define this to use the RF69 driver i.s.o. RF12 
+#define RF69_COMPAT      1   // define this to use the RF69 driver i.s.o. RF12 
 //                           // The above flag must be set similarly in RF12.cpp
 //                           // and RF69_avr.h
 ///////////////////////////////////////////////////////////////////////////////
@@ -8,10 +8,10 @@
 #include <OneWire.h>
 #define AIO2 9 // d9
 #define SALUSID 16
-#define SALUSFREQUENCY 1669 // JeeLink 69c (Red)
+#define SALUSFREQUENCY 1660
 #define ON  1
 #define OFF 2
-#define TEMPCHECK 60        // Check the temperatures each minute
+#define TEMPCHECK 6        // Check the temperatures each minute
 
 #define REG_BITRATEMSB 0x03 // RFM69 only, 0x02, // BitRateMsb, data rate = 49,261 khz
 #define REG_BITRATELSB 0x04 // RFM69 only, 0x8A, // BitRateLsb divider = 32 MHz / 650 == 49,230 khz
@@ -117,40 +117,68 @@ unsigned int getTemp(void)
 // 28 C9 C5 4D 4 00 00 04
 //////////////////////////
 
-#define ACK_TIME        20  // number of milliseconds - 1 to wait for an ack
+#define ACK_TIME        49  // number of milliseconds - to wait for an ack, an initial 50ms
 #define RETRY_LIMIT      7
-byte NodeID = 31;
+byte NodeID = 16;
 
 static byte sendACK() {
   for (byte t = 1; t <= RETRY_LIMIT; t++) {  
-      rf12_sleep(RF12_WAKEUP);
-//      while (!rf12_canSend())
       delay(t * t);                   // Increasing the gap between retransmissions
       payload.attempts = t;
+      rf12_sleep(RF12_WAKEUP);
+      if(rf12_recvDone()) {
+          Serial.print("Discarded: ");                // Flush the buffer
+          for (byte i = 0; i < 8; i++) {;
+              showByte(rf12_buf[i]);
+              rf12_buf[i] = 0xFF;                     // Paint it over
+              printOneChar(' ');
+          }
+          Serial.println(); 
+      }
       rf12_sendStart(RF12_HDR_ACK, &payload, sizeof payload);
       byte acked = waitForAck(t * t); // Wait for increasingly longer time for the ACK
-      rf12_sleep(RF12_SLEEP);
-        if (acked) {
+      if (acked) {
+          for (byte i = 0; i < 8; i++) {
+              rf12_buf[i] = 0xFF;                     // Paint over buffer
+          }
           return t;
-        } else {
-            Serial.print(".");
-            Serial.flush();
-        }
-     }
-     return 0; 
+      }
   }
+  return 0;
+} // sendACK
+
 static byte waitForAck(byte t) {
     MilliTimer ackTimer;
     while (!ackTimer.poll(ACK_TIME + t)) {
-        if (rf12_recvDone() && rf12_crc == 0 &&
+        if (rf12_recvDone()) {
+            rf12_sleep(RF12_SLEEP);
+            Serial.print((ACK_TIME + t) - ackTimer.remaining());
+            Serial.print("ms RX");
+            if(rf12_crc == 0 &&
                 // see http://talk.jeelabs.net/topic/811#post-4712
-                rf12_hdr == (RF12_HDR_DST | RF12_HDR_CTL | NodeID))
+                rf12_hdr == (RF12_HDR_DST | RF12_HDR_CTL | NodeID)) {
+                Serial.print(" ACK");
+                } else {
+                    if(rf12_recvDone()) {
+                        Serial.print("Noise: ");                // Flush the buffer
+                        for (byte i = 0; i < 8; i++) {;
+                        showByte(rf12_buf[i]);
+                        rf12_buf[i] = 0xFF;                     // Paint it over
+                        printOneChar(' ');
+                    }
+                  } 
+                }
+            showStats();           
             return 1;
+        } 
         set_sleep_mode(SLEEP_MODE_IDLE);   // Wait a while for the reply?
         sleep_mode();
     }
+    Serial.print(ACK_TIME + t);
+    Serial.println("ms ACK Timeout");
+    Serial.flush();
     return 0;
-}
+} // waitForAck
 
 static void printOneChar (char c) {
     Serial.print(c);
@@ -214,6 +242,25 @@ void setup () {
   delay(10);                // Wait for copy to complete
 */
   }
+static void showStats() {
+#if RF69_COMPAT
+            Serial.print(" a=");
+            Serial.print(RF69::afc);                        // TODO What units is this count?
+            Serial.print(" f=");
+            Serial.print(RF69::fei);                        // TODO What units is this count?
+            Serial.print(" l=");
+            Serial.print(RF69::lna >> 3);
+            Serial.print(" t=");
+            Serial.print((RF69::readTemperature(-10)));        
+            Serial.print(" (");
+            Serial.print(RF69::rssi >> 1);
+            if (RF69::rssi & 0x01) Serial.print(".5");
+            Serial.print("dB");
+            Serial.println(")");
+            Serial.flush();
+#endif
+}
+  
 void loop () {
 /*
  * Setup to receive Salus transmissions
@@ -228,16 +275,18 @@ void loop () {
 #if RF69_COMPAT
     RF69::control(REG_BITRATEMSB | 0x80, 0x34);                   // 2.4kbps
     RF69::control(REG_BITRATELSB | 0x80, 0x15);
-    RF69::control(REG_BITFDEVMSB | 0x80, 0x04);                   // 75kHz freq shift
-    RF69::control(REG_BITFDEVLSB | 0x80, 0xCE);
+    RF69::control(REG_BITFDEVMSB | 0x80, 0x03);                   // 60kHz freq shift
+    RF69::control(REG_BITFDEVLSB | 0x80, 0xD7);
     rf12_sleep(RF12_WAKEUP);                                      // All set, wake up radio
 #else
     rf12_control(0xC040);                                         // set low-battery level to 2.2V
     rf12_control(RF12_DATA_RATE_2);                               // 0xC691 app 2.4kbps
-    rf12_control(0x9830);                                         // 75khz freq shift
+    rf12_control(0x9830);                                         // 60khz freq shift
     rf12_sleep(RF12_WAKEUP);                                      // Wake up radio
 #endif
     rf12_recvDone();                                              // Enter receive mode
+    Serial.println("Waiting");
+    Serial.flush();
     
     elapsed = elapsed + (TEMPCHECK - (Sleepy::idleSomeTime(TEMPCHECK)));  // Check temperatures every minute
 
@@ -248,14 +297,15 @@ void loop () {
     if (rf12_recvDone()) {
 #endif
         if ((rf12_buf[0] == 212 && ((rf12_buf[1] | rf12_buf[2]) == rf12_buf[3]) 
-          && rf12_buf[4] == 90/* && rf12_buf[1] == SALUSID*/)) {          // Capture all Salus packets
+          && rf12_buf[4] == 90/* && rf12_buf[1] == SALUSID*/)) {      // Capture all Salus packets
             rf12_buf[4] = ~90;
-            salusMillis = millis() + salusTimeout;
             rf12_sleep(RF12_SLEEP);
+            salusMillis = millis() + salusTimeout;
             Serial.print("Salus: ");
             Serial.print(rf12_buf[1]);
             Serial.print(",");
-            Serial.println(rf12_buf[2]);
+            Serial.print(rf12_buf[2]);
+            showStats();
             Serial.flush();
             elapsed = ~0;                                             // Trigger a transmit
             payload.salusAddress = rf12_buf[1];   
@@ -341,15 +391,14 @@ void loop () {
             Serial.print("Node ");
             Serial.print(NodeID);
             Serial.print(" sending to JeeNet #");
-            Serial.print(payload.count);
-            Serial.print(" ");
+            Serial.println(payload.count);
             Serial.flush();
             
-            payload.attempts = sendACK();
+            byte tries = sendACK();
             
-            if(payload.attempts) { 
-                Serial.print(payload.attempts);
-                Serial.println(" attempts");
+            if(tries) { 
+                Serial.print(tries);
+                Serial.println(" attempt(s)");
             } else {
                 Serial.println(" aborted");
             }
