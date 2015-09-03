@@ -11,7 +11,7 @@
 #define SALUSFREQUENCY 1660
 #define ON  1
 #define OFF 2
-#define TEMPCHECK 6        // Check the temperatures each minute
+#define TEMPCHECK 5        // Check the temperatures each minute
 
 #define REG_BITRATEMSB 0x03 // RFM69 only, 0x02, // BitRateMsb, data rate = 49,261 khz
 #define REG_BITRATELSB 0x04 // RFM69 only, 0x8A, // BitRateLsb divider = 32 MHz / 650 == 49,230 khz
@@ -155,21 +155,19 @@ static byte waitForAck(byte t) {
             Serial.print((ACK_TIME + t) - ackTimer.remaining());
             Serial.print("ms RX");
             if(rf12_crc == 0 &&
-                // see http://talk.jeelabs.net/topic/811#post-4712
-                rf12_hdr == (RF12_HDR_DST | RF12_HDR_CTL | NodeID)) {
-                Serial.print(" ACK");
+              // see http://talk.jeelabs.net/topic/811#post-4712
+              rf12_hdr == (RF12_HDR_DST | RF12_HDR_CTL | NodeID)) {
+                  Serial.print(" ACK");
                 } else {
-                    if(rf12_recvDone()) {
-                        Serial.print("Noise: ");                // Flush the buffer
-                        for (byte i = 0; i < 8; i++) {;
+                    Serial.print("Noise: ");                // Flush the buffer
+                    for (byte i = 0; i < 8; i++) {;
                         showByte(rf12_buf[i]);
-                        rf12_buf[i] = 0xFF;                     // Paint it over
+                        rf12_buf[i] = 0xFF;                 // Paint it over
                         printOneChar(' ');
-                    }
-                  } 
+                    } 
                 }
-            showStats();           
-            return 1;
+                showStats();           
+                return 1;
         } 
         set_sleep_mode(SLEEP_MODE_IDLE);   // Wait a while for the reply?
         sleep_mode();
@@ -400,7 +398,7 @@ void loop () {
                 Serial.print(tries);
                 Serial.println(" attempt(s)");
             } else {
-                Serial.println(" aborted");
+                Serial.println("Aborted");
             }
             Serial.flush();             
         } else {
