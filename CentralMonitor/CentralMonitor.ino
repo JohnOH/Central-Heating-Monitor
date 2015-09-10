@@ -11,7 +11,7 @@
 #define SALUSFREQUENCY 1660
 #define ON  1
 #define OFF 2
-#define TEMPCHECK 5        // Check the temperatures each minute
+#define TEMPCHECK 660        // Check the temperatures every 11 minutes
 
 #define REG_BITRATEMSB 0x03 // RFM69 only, 0x02, // BitRateMsb, data rate = 49,261 khz
 #define REG_BITRATELSB 0x04 // RFM69 only, 0x8A, // BitRateLsb divider = 32 MHz / 650 == 49,230 khz
@@ -57,7 +57,7 @@ byte HotFeed[8] = {0x28,0x53,0x4F,0x4E,0x04,0x00,0x00,0x84};
 byte addr[8];
 byte needOff = false;
 byte salusOff[] = {SALUSID, OFF, SALUSID | OFF, 90};
-byte elapsed = 0;
+unsigned int elapsed = 0;
 
 ISR(WDT_vect) { Sleepy::watchdogEvent(); }
 //
@@ -283,7 +283,7 @@ void loop () {
     rf12_sleep(RF12_WAKEUP);                                      // Wake up radio
 #endif
     rf12_recvDone();                                              // Enter receive mode
-    Serial.println("Waiting");
+    Serial.println("Waiting for Salus");
     Serial.flush();
     
     elapsed = elapsed + (TEMPCHECK - (Sleepy::idleSomeTime(TEMPCHECK)));  // Check temperatures every minute
@@ -382,13 +382,13 @@ void loop () {
         Serial.println();
         Serial.flush();
         */
-        if ((payload.TankCoilReturn + 2) > payload.BoilerFeed) needOff = true;
+     //   if ((payload.TankCoilReturn + 2) > payload.BoilerFeed) needOff = true;
     
         payload.count++;
         if (NodeID = rf12_configSilent()) {
             Serial.print("Node ");
             Serial.print(NodeID);
-            Serial.print(" sending to JeeNet #");
+            Serial.print(" sending packet #");
             Serial.println(payload.count);
             Serial.flush();
             
@@ -410,6 +410,9 @@ void loop () {
               }  
         }
         elapsed = 0; 
+    } else {
+      Serial.print(elapsed);
+      Serial.println(" seconds elapsed");
     }
     Serial.print("Looping ");
     Serial.println(++loopCount);
