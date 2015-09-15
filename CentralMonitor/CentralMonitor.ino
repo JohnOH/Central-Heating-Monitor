@@ -1,5 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////////
-#define RF69_COMPAT      1   // define this to use the RF69 driver i.s.o. RF12 
+#define RF69_COMPAT      0   // define this to use the RF69 driver i.s.o. RF12 
 //                           // The above flag must be set similarly in RF12.cpp
 //                           // and RF69_avr.h
 ///////////////////////////////////////////////////////////////////////////////
@@ -11,7 +11,7 @@
 #define SALUSFREQUENCY 1660
 #define ON  1
 #define OFF 2
-#define TEMPCHECK 660        // Check the temperatures every 11 minutes
+#define TEMPCHECK 60        // Check the temperatures every 60 seconds
 
 #define REG_BITRATEMSB 0x03 // RFM69 only, 0x02, // BitRateMsb, data rate = 49,261 khz
 #define REG_BITRATELSB 0x04 // RFM69 only, 0x8A, // BitRateLsb divider = 32 MHz / 650 == 49,230 khz
@@ -48,11 +48,10 @@ OneWire  ds(PD7); // DIO4
 unsigned long salusMillis;
 static unsigned long salusTimeout = 21 * 60 * 1000ul;
 unsigned int loopCount;
-byte ColdFeed[8] = {0x28,0x9E,0x77,0x37,0x03,0x00,0x00,0xAA};
+byte ColdFeed[8] = {0x28,0x53,0x4F,0x4E,0x04,0x00,0x00,0x84};
 byte BoilerFeed[8] = {0x28,0x86,0x39,0x4E,0x04,0x00,0x00,0x5A};
 byte CentralHeatingReturn[8] = {0x28,0x7F,0xCA,0x4D,0x4,0x0,0x0,0xDE};
 byte TankCoilReturn[8] = {0x28,0x7F,0xC6,0x4D,0x04,0x00,0x00,0xFF};
-byte HotFeed[8] = {0x28,0x53,0x4F,0x4E,0x04,0x00,0x00,0x84};
 
 byte addr[8];
 byte needOff = false;
@@ -72,42 +71,15 @@ unsigned int ColdFeed;
 unsigned int BoilerFeed;
 unsigned int CentralHeatingReturn;
 unsigned int TankCoilReturn;
-unsigned int HotFeed;
+//unsigned int HotFeed;
 } payload;                                                                         //
 /////////////////////////////////////////////////////////////////////////////////////
 
-unsigned int getTemp(void)
-{
-  byte i;
-  byte present = 0;
-  byte data[12]; 
-  
-//  Serial.print("  Data = ");
-//  Serial.print(present,HEX);
-//  Serial.print(" ");
-
-  for ( i = 0; i < 9; i++) {           // we need 9 bytes
-    data[i] = ds.read();
-//    Serial.print(data[i], HEX);
-//    Serial.print(" ");
-  }
-//  Serial.print(" CRC=");
-//  Serial.print(OneWire::crc8(data, 8), HEX);
- // Serial.println();
-
-  // convert the data to actual temperature
-
-  int raw = (data[1] << 8) | data[0];
-//  raw = raw << 3; // 9 bit resolution default
-  raw = raw * 10;
-  raw = raw >> 4;
-  return (raw); // return t*10
-//  return ((data[1] << 8) + data[0]); // return t*16
-}
-// Ten off wired DS18B20 from Alibaba
+// Ten off wired DS18B20
+// Blk=GND, Blue=DQ Red=Vdd
 // 28 7F C6 4D 4 00 00 FF Tank Coil
 // 28 7F CA 4D 4 00 00 DE Central Heating Return
-// 28 53 4F 4E 4 00 00 84 Tank Stat
+// 28 53 4F 4E 4 00 00 84 Cold Feed
 // 28 E8 AC 4E 4 00 00 EF
 // 28 26 E6 4D 4 00 00 BF
 // 28 86 39 4E 4 00 00 5A Boiler Feed
@@ -152,6 +124,7 @@ static byte waitForAck(byte t) {
     while (!ackTimer.poll(ACK_TIME + t)) {
         if (rf12_recvDone()) {
             rf12_sleep(RF12_SLEEP);
+
             Serial.print((ACK_TIME + t) - ackTimer.remaining());
             Serial.print("ms RX");
             if(rf12_crc == 0 &&
@@ -164,9 +137,9 @@ static byte waitForAck(byte t) {
                         showByte(rf12_buf[i]);
                         rf12_buf[i] = 0xFF;                 // Paint it over
                         printOneChar(' ');
-                    } 
+                    }
+                    showStats();                                
                 }
-                showStats();           
                 return 1;
         } 
         set_sleep_mode(SLEEP_MODE_IDLE);   // Wait a while for the reply?
@@ -221,25 +194,31 @@ void setup () {
   payload.salusAddress = ~0;          // Until we know better
   payload.salusCommand = ON;          // ditto
   salusMillis = millis() + salusTimeout;
-  
-/*
+
   pinMode(17, OUTPUT);      // Set the pin, AIO4 - Power the DS18B20's
   digitalWrite(17, HIGH);   // Power up the DS18B20's
-  
-/// Configure the DS20B18 ///
-  ds.reset();               // Set for 9 bit measurements //
+  Sleepy::loseSomeTime(100);
+
+/// Configure the DS18B20 ///
+  ds.reset();               // Set for 12 bit measurements //
   ds.skip();                // Next command to all devices
+  
   ds.write(0x4E);           // Write to Scratch Pad
   ds.write(0x7F);           // Set T(h)
   ds.write(0x80);           // Set T(l)
-  ds.write(0x1F);           // Set Config
+  ds.write(0x7F);           // Set Config 12 bit
+
+/*  
 /// Copy config to on-chip EEProm
-  ds.reset();               // Set for 9 bit measurements //
+  ds.reset();
   ds.skip();                // Next command to all devices
   ds.write(0x48);           // Set Config
-  delay(10);                // Wait for copy to complete
 */
-  }
+  Sleepy::loseSomeTime(100);// Wait for copy to complete
+  digitalWrite(17, LOW);    // Power down the DS18B20's    
+
+  } //  Setup
+  
 static void showStats() {
 #if RF69_COMPAT
             Serial.print(" a=");
@@ -253,12 +232,44 @@ static void showStats() {
             Serial.print(" (");
             Serial.print(RF69::rssi >> 1);
             if (RF69::rssi & 0x01) Serial.print(".5");
-            Serial.print("dB");
-            Serial.println(")");
-            Serial.flush();
+            Serial.print("dB)");
 #endif
+            Serial.println();
+            Serial.flush();
 }
-  
+
+unsigned int getTemp(byte* sensor) {
+  byte i;
+  byte present = 0;
+  byte data[12]; 
+
+  ds.reset();
+  ds.select(sensor);    
+  ds.write(0xBE);                                            // Read Scratchpad
+
+  Serial.print("Data = ");
+//  Serial.print(present,HEX);
+//  Serial.print(" ");
+
+  for ( i = 0; i < 9; i++) {           // we need 9 bytes
+    data[i] = ds.read();
+    Serial.print(data[i], HEX);
+    Serial.print(" ");
+  }
+/*
+  Serial.print(" CRC=");
+  Serial.print(OneWire::crc8(data, 8), HEX);
+  Serial.println();
+*/
+  // convert the data to actual temperature
+
+  long int raw = (data[1] << 8) | data[0];
+// Assuming 12 bit precision
+  raw = raw * 100;
+  raw = raw >> 4;
+  return (raw); // return t*100
+}
+
 void loop () {
 /*
  * Setup to receive Salus transmissions
@@ -340,50 +351,33 @@ void loop () {
         payload.salusCommand = OFF | 0x80;                        // Update the Jee world status
     }                                                             // 0x80 indicates Jeenode commanded off
     if (elapsed >= TEMPCHECK) {
-        /*
-        digitalWrite(17, HIGH);                                       // Power up the DS18B20's
+        digitalWrite(17, HIGH);                                   // Power up the DS18B20's
         ds.reset();
-        ds.skip();                                                    // Next command to all devices
-        ds.write(0x44);                                               // Start all temperature conversions.
-        Sleepy::loseSomeTime(100);                                    // Wait for the data to be available
+        ds.skip();                                                // Next command to all devices
+        ds.write(0x44);                                           // Start all temperature conversions.
+        Sleepy::loseSomeTime(1000);                               // Wait for the data to be available
 
-        ds.reset();
-        ds.select(ColdFeed);    
-        ds.write(0xBE);                                               // Read Scratchpad
-        payload.ColdFeed = getTemp();
+        payload.ColdFeed = getTemp(ColdFeed);
+        Serial.print("Cold Feed:");
         Serial.println(payload.ColdFeed);
 
-        ds.reset();
-        ds.select(BoilerFeed);    
-        ds.write(0xBE);                                               // Read Scratchpad
-        payload.BoilerFeed = getTemp();
+        payload.BoilerFeed = getTemp(BoilerFeed);
+        Serial.print("Boiler Feed:");
         Serial.println(payload.BoilerFeed);
 
-        ds.reset();
-        ds.select(CentralHeatingReturn);    
-        ds.write(0xBE);                                               // Read Scratchpad
-        payload.CentralHeatingReturn = getTemp();
+        payload.CentralHeatingReturn = (getTemp(CentralHeatingReturn)) - 12;
+        Serial.print("Heating Return:");
         Serial.println(payload.CentralHeatingReturn);
 
-        ds.reset();
-        ds.select(TankCoilReturn);    
-        ds.write(0xBE);                                               // Read Scratchpad
-        payload.TankCoilReturn = getTemp();
+        payload.TankCoilReturn = getTemp(TankCoilReturn);
+        Serial.print("Coil Return:");
         Serial.println(payload.TankCoilReturn);
 
-        ds.reset();
-        ds.select(HotFeed);    
-        ds.write(0xBE);                                               // Read Scratchpad
-        payload.HotFeed = getTemp();
-
-        digitalWrite(17, LOW);                                        // Power down the DS18B20's    
-    
-        Serial.println(payload.HotFeed);
-        Serial.println();
+        digitalWrite(17, LOW);                                     // Power down the DS18B20's    
         Serial.flush();
-        */
+
      //   if ((payload.TankCoilReturn + 2) > payload.BoilerFeed) needOff = true;
-    
+
         payload.count++;
         if (NodeID = rf12_configSilent()) {
             Serial.print("Node ");
