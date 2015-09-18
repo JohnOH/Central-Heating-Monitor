@@ -15,8 +15,14 @@
 
 #define REG_BITRATEMSB 0x03 // RFM69 only, 0x02, // BitRateMsb, data rate = 49,261 khz
 #define REG_BITRATELSB 0x04 // RFM69 only, 0x8A, // BitRateLsb divider = 32 MHz / 650 == 49,230 khz
-#define REG_BITFDEVMSB 0x05 // RFM69 only, 0x02, // FdevMsb = 45 KHz
-#define REG_BITFDEVLSB 0x06 // RFM69 only, 0xE1, // FdevLsb = 45 KHz
+#define REG_BITFDEVMSB 0x05
+#define REG_BITFDEVLSB 0x06
+
+#if DEBUG
+#define D(x) x
+#else
+#define D(x)
+#endif
 
 OneWire  ds(PD7); // DIO4
 /*
@@ -64,9 +70,10 @@ ISR(WDT_vect) { Sleepy::watchdogEvent(); }
 struct payload{                                                                    //
 byte attempts: 4;     // transmission attempts
 byte count: 4;        // packet count
+byte voltage;
 byte salusAddress;
 byte salusCommand;
-unsigned int salusNoise;
+byte salusNoise;
 unsigned int ColdFeed;
 unsigned int BoilerFeed;
 unsigned int CentralHeatingReturn;
@@ -99,13 +106,13 @@ static byte sendACK() {
       payload.attempts = t;
       rf12_sleep(RF12_WAKEUP);
       if(rf12_recvDone()) {
-          Serial.print("Discarded: ");                // Flush the buffer
+          // Serial.print("Discarded: ");                // Flush the buffer
           for (byte i = 0; i < 8; i++) {;
               showByte(rf12_buf[i]);
               rf12_buf[i] = 0xFF;                     // Paint it over
               printOneChar(' ');
           }
-          Serial.println(); 
+          // Serial.println(); 
       }
       rf12_sendStart(RF12_HDR_ACK, &payload, sizeof payload);
       byte acked = waitForAck(t * t); // Wait for increasingly longer time for the ACK
@@ -125,14 +132,14 @@ static byte waitForAck(byte t) {
         if (rf12_recvDone()) {
             rf12_sleep(RF12_SLEEP);
 
-            Serial.print((ACK_TIME + t) - ackTimer.remaining());
-            Serial.print("ms RX");
+            // Serial.print((ACK_TIME + t) - ackTimer.remaining());
+            // Serial.print("ms RX");
             if(rf12_crc == 0 &&
               // see http://talk.jeelabs.net/topic/811#post-4712
               rf12_hdr == (RF12_HDR_DST | RF12_HDR_CTL | NodeID)) {
-                  Serial.print(" ACK");
+                  // Serial.print(" ACK");
                 } else {
-                    Serial.print("Noise: ");                // Flush the buffer
+                    // Serial.print("Noise: ");                // Flush the buffer
                     for (byte i = 0; i < 8; i++) {;
                         showByte(rf12_buf[i]);
                         rf12_buf[i] = 0xFF;                 // Paint it over
@@ -145,21 +152,21 @@ static byte waitForAck(byte t) {
         set_sleep_mode(SLEEP_MODE_IDLE);   // Wait a while for the reply?
         sleep_mode();
     }
-    Serial.print(ACK_TIME + t);
-    Serial.println("ms ACK Timeout");
-    Serial.flush();
+    // Serial.print(ACK_TIME + t);
+    // Serial.println("ms ACK Timeout");
+    // Serial.flush();
     return 0;
 } // waitForAck
 
 static void printOneChar (char c) {
-    Serial.print(c);
+    // Serial.print(c);
 }
 
 static void showNibble (byte nibble) {
     char c = '0' + (nibble & 0x0F);
     if (c > '9')
         c += 7;
-    Serial.print(c);
+    // Serial.print(c);
 }
 
 static void showByte (byte value) {
@@ -167,29 +174,57 @@ static void showByte (byte value) {
         showNibble(value >> 4);
         showNibble(value);
 //    } else
-//        Serial.print((word) value, DEC);
+//        // Serial.print((word) value, DEC);
 }
 static void showWord (unsigned int value) {
 //    if (config.output & 0x1) {
         showByte (value >> 8);
         showByte (value);
 //    } else
-//        Serial.print((word) value);    
+//        // Serial.print((word) value);    
 }
 
+unsigned int readVcc() {
+  // Read 1.1V reference against AVcc
+  // set the reference to Vcc and the measurement to the internal 1.1V reference
+  #if defined(__AVR_ATmega32U4__) || defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+    ADMUX = _BV(REFS0) | _BV(MUX4) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+  #elif defined (__AVR_ATtiny24__) || defined(__AVR_ATtiny44__) || defined(__AVR_ATtiny84__)
+    ADMUX = _BV(MUX5) | _BV(MUX0);
+  #elif defined (__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__)
+    ADMUX = _BV(MUX3) | _BV(MUX2);
+  #else
+    ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+  #endif  
+ 
+  delay(2); // Wait for Vref to settle
+  ADCSRA |= _BV(ADSC); // Start conversion
+  while (bit_is_set(ADCSRA,ADSC)); // measuring
+ 
+  uint8_t low  = ADCL; // must read ADCL first - it then locks ADCH  
+  uint8_t high = ADCH; // unlocks both
+ 
+  unsigned int result = (high<<8) | low;
+ 
+  result = ((1125300L / result)/100);   // Calculate Vcc (in mV); 1125300 = 1.1*1023*1000
+  return result; // Vcc in millivolts
+}
 
 void setup () {
   delay(100);          // Delay on startup to avoid ISP/RFM12B interference.
-  Serial.begin(57600);
+  // Serial.begin(57600);
+  // Serial.print((__DATE__));
+  // Serial.print(" ");
+  // Serial.println((__TIME__));
 #if RF69_COMPAT
-  Serial.print("RFM69x ");
+  // Serial.print("RFM69x ");
 #else
-  Serial.print("RFM12x ");
+  // Serial.print(" RFM12x ");
 #endif
-  Serial.print(SALUSFREQUENCY);  
-  Serial.print(" Heating monitor:");
+  // Serial.print(SALUSFREQUENCY);  
+  // Serial.print(" Heating monitor:");
   rf12_configDump();
-  Serial.flush();
+  // Serial.flush();
   payload.BoilerFeed = ~0;
   payload.salusAddress = ~0;          // Until we know better
   payload.salusCommand = ON;          // ditto
@@ -221,21 +256,21 @@ void setup () {
   
 static void showStats() {
 #if RF69_COMPAT
-            Serial.print(" a=");
-            Serial.print(RF69::afc);                        // TODO What units is this count?
-            Serial.print(" f=");
-            Serial.print(RF69::fei);                        // TODO What units is this count?
-            Serial.print(" l=");
-            Serial.print(RF69::lna >> 3);
-            Serial.print(" t=");
-            Serial.print((RF69::readTemperature(-10)));        
-            Serial.print(" (");
-            Serial.print(RF69::rssi >> 1);
-            if (RF69::rssi & 0x01) Serial.print(".5");
-            Serial.print("dB)");
+            // Serial.print(" a=");
+            // Serial.print(RF69::afc);                        // TODO What units is this count?
+            // Serial.print(" f=");
+            // Serial.print(RF69::fei);                        // TODO What units is this count?
+            // Serial.print(" l=");
+            // Serial.print(RF69::lna >> 3);
+            // Serial.print(" t=");
+            // Serial.print((RF69::readTemperature(-10)));        
+            // Serial.print(" (");
+            // Serial.print(RF69::rssi >> 1);
+            if (RF69::rssi & 0x01) // Serial.print(".5");
+            // Serial.print("dB)");
 #endif
-            Serial.println();
-            Serial.flush();
+            // Serial.println();
+            // Serial.flush();
 }
 
 unsigned int getTemp(byte* sensor) {
@@ -247,19 +282,19 @@ unsigned int getTemp(byte* sensor) {
   ds.select(sensor);    
   ds.write(0xBE);                                            // Read Scratchpad
 
-  Serial.print("Data = ");
-//  Serial.print(present,HEX);
-//  Serial.print(" ");
+  // Serial.print("Data = ");
+//  // Serial.print(present,HEX);
+//  // Serial.print(" ");
 
   for ( i = 0; i < 9; i++) {           // we need 9 bytes
     data[i] = ds.read();
-    Serial.print(data[i], HEX);
-    Serial.print(" ");
+    // Serial.print(data[i], HEX);
+    // Serial.print(" ");
   }
 /*
-  Serial.print(" CRC=");
-  Serial.print(OneWire::crc8(data, 8), HEX);
-  Serial.println();
+  // Serial.print(" CRC=");
+  // Serial.print(OneWire::crc8(data, 8), HEX);
+  // Serial.println();
 */
   // convert the data to actual temperature
 
@@ -294,8 +329,8 @@ void loop () {
     rf12_sleep(RF12_WAKEUP);                                      // Wake up radio
 #endif
     rf12_recvDone();                                              // Enter receive mode
-    Serial.println("Waiting for Salus");
-    Serial.flush();
+    // Serial.println("Waiting for Salus");
+    // Serial.flush();
     
     elapsed = elapsed + (TEMPCHECK - (Sleepy::idleSomeTime(TEMPCHECK)));  // Check temperatures every minute
 
@@ -310,12 +345,12 @@ void loop () {
             rf12_buf[4] = ~90;
             rf12_sleep(RF12_SLEEP);
             salusMillis = millis() + salusTimeout;
-            Serial.print("Salus: ");
-            Serial.print(rf12_buf[1]);
-            Serial.print(",");
-            Serial.print(rf12_buf[2]);
+            // Serial.print("Salus: ");
+            // Serial.print(rf12_buf[1]);
+            // Serial.print(",");
+            // Serial.print(rf12_buf[2]);
             showStats();
-            Serial.flush();
+            // Serial.flush();
             elapsed = ~0;                                             // Trigger a transmit
             payload.salusAddress = rf12_buf[1];   
             payload.salusCommand = rf12_buf[2];   
@@ -326,7 +361,7 @@ void loop () {
                 showByte(rf12_buf[i]);
                 printOneChar(' ');
             }
-            Serial.println();
+            // Serial.println();
         }
     }
 
@@ -335,12 +370,12 @@ void loop () {
                 showByte(rf12_buf[i]);
                 printOneChar(' ');
             }
-            Serial.println();
+            // Serial.println();
 */
     if (((millis() > salusMillis) || needOff)) {                  // Is a Salus Off required?
         needOff = false;
         salusMillis = millis() + salusTimeout;
-        Serial.println("Sending Salus off");
+        // Serial.println("Sending Salus off");
         rf12_sleep(RF12_WAKEUP);
 //        while (!rf12_canSend())
         rf12_skip_hdr();                                          // Omit Jeelib header 2 bytes on transmission
@@ -358,58 +393,61 @@ void loop () {
         Sleepy::loseSomeTime(1000);                               // Wait for the data to be available
 
         payload.ColdFeed = getTemp(ColdFeed);
-        Serial.print("Cold Feed:");
-        Serial.println(payload.ColdFeed);
+        // Serial.print("Cold Feed:");
+        // Serial.println(payload.ColdFeed);
 
         payload.BoilerFeed = getTemp(BoilerFeed);
-        Serial.print("Boiler Feed:");
-        Serial.println(payload.BoilerFeed);
+        // Serial.print("Boiler Feed:");
+        // Serial.println(payload.BoilerFeed);
 
         payload.CentralHeatingReturn = (getTemp(CentralHeatingReturn)) - 12;
-        Serial.print("Heating Return:");
-        Serial.println(payload.CentralHeatingReturn);
+        // Serial.print("Heating Return:");
+        // Serial.println(payload.CentralHeatingReturn);
 
         payload.TankCoilReturn = getTemp(TankCoilReturn);
-        Serial.print("Coil Return:");
-        Serial.println(payload.TankCoilReturn);
+        // Serial.print("Coil Return:");
+        // Serial.println(payload.TankCoilReturn);
 
         digitalWrite(17, LOW);                                     // Power down the DS18B20's    
-        Serial.flush();
+        // Serial.flush();
 
      //   if ((payload.TankCoilReturn + 2) > payload.BoilerFeed) needOff = true;
 
         payload.count++;
         if (NodeID = rf12_configSilent()) {
-            Serial.print("Node ");
-            Serial.print(NodeID);
-            Serial.print(" sending packet #");
-            Serial.println(payload.count);
-            Serial.flush();
+            // Serial.print("Node ");
+            // Serial.print(NodeID);
+            // Serial.print(" sending packet #");
+            // Serial.println(payload.count);
+            // Serial.flush();
             
             byte tries = sendACK();
             
             if(tries) { 
-                Serial.print(tries);
-                Serial.println(" attempt(s)");
+                // Serial.print(tries);
+                // Serial.println(" attempt(s)");
             } else {
-                Serial.println("Aborted");
+                // Serial.println("Aborted");
             }
-            Serial.flush();             
+            // Serial.flush();             
         } else {
               while( true ){
                 rf12_sleep(RF12_SLEEP);
-                Serial.println("RF12 eeprom not valid, run RF12Demo");
-                Serial.flush();
+                // Serial.println("RF12 eeprom not valid, run RF12Demo");
+                // Serial.flush();
                 Sleepy::idleSomeTime(60);
               }  
         }
         elapsed = 0; 
     } else {
-      Serial.print(elapsed);
-      Serial.println(" seconds elapsed");
+      // Serial.print(elapsed);
+      // Serial.println(" seconds elapsed");
     }
-    Serial.print("Looping ");
-    Serial.println(++loopCount);
-    Serial.flush();
+    // Serial.print("Voltage:");
+    payload.voltage = readVcc();
+    // Serial.println(payload.voltage);
+    // Serial.print("Looping ");
+    // Serial.println(++loopCount);
+    // Serial.flush();
 } // Loop
 
