@@ -65,11 +65,14 @@ byte needOff = false;
 byte salusOff[] = {SALUSID, OFF, SALUSID | OFF, 90};
 byte WatchSALUS = false;
 unsigned int elapsed = 0;
+unsigned int maxCH = 6000;
+unsigned int maxBoiler = 6500;
 
 ISR(WDT_vect) { Sleepy::watchdogEvent(); }
 //
 /////////////////////////////////////////////////////////////////////////////////////
 struct payload{                                                                    //
+byte command;         // Last command received in ACK
 byte attempts: 4;     // transmission attempts
 byte count: 4;        // packet count
 byte voltage;
@@ -126,25 +129,36 @@ static byte sendACK() {
               printOneChar(' ');
           }
           // Serial.println();
-          if(rf12_buf[2] == 1) {
+          if(rf12_buf[2]) {
+              payload.command = rf12_buf[3];
+              // Serial.print(rf12_buf[3]);
               switch(rf12_buf[3]) {
-                  case 0x01:
-                      // Serial.println("ON");
+                  case 1:
                       WatchSALUS = true;
                       payload.salusAddress = ~0;          // Salus monitoring restarted
                       payload.salusCommand = 0;           // ditto
+                      // Serial.println("Salus Monitoring On");
                       break;
-                  case 0x02:
-                      // Serial.println("OFF");
+                  case 2:
                       WatchSALUS = false;
                       payload.salusAddress = 0;           // Salus monitoring suspended
                       payload.salusCommand = 0;           // ditto
+                      // Serial.println("Salus Monitoring Off");
                       break;
+                  case 140:
+                      maxBoiler = rf12_buf[4] * 100;
+                      // Serial.println("Set Boiler Feed Threshold");
+                      break;      
+                  case 150:
+                      maxCH = rf12_buf[4] * 100;
+                      // Serial.println("Set Central Heating Return Threshold");
+                      break;      
                   default:
-                      // Serial.println("Unknown command"); 
+                      // Serial.println("Unknown Command");
+//                      payload.command = 0;
                       break;      
                   }
-          }
+          } // else payload.command = 0;
           return t;
       }
   }
@@ -264,7 +278,7 @@ void setup () {
 
   pinMode(17, OUTPUT);      // Set the pin, AIO4 - Power the DS18B20's
   digitalWrite(17, HIGH);   // Power up the DS18B20's
-  Sleepy::loseSomeTime(100);
+  Sleepy::loseSomeTime((100 + 16));
 
 /// Configure the DS18B20 ///
   ds.reset();               // Set for 12 bit measurements //
@@ -281,7 +295,7 @@ void setup () {
   ds.skip();                // Next command to all devices
   ds.write(0x48);           // Set Config
 */
-  Sleepy::loseSomeTime(100);// Wait for copy to complete
+  Sleepy::loseSomeTime((100 + 16));// Wait for copy to complete
   digitalWrite(17, LOW);    // Power down the DS18B20's    
 
   } //  Setup
@@ -341,7 +355,6 @@ void loop () {
 /*
  * Setup to receive Salus transmissions
  */
-    if(WatchSALUS) {
         rf12_initialize (SALUSID, RF12_868MHZ, 212, SALUSFREQUENCY);  // 868.360khz
         rf12_sleep(RF12_SLEEP);                                       // Sleep while we tweak things
 #if RF69_COMPAT
@@ -354,19 +367,37 @@ void loop () {
         rf12_control(0xC040);                                         // set low-battery level to 2.2V
         rf12_control(RF12_DATA_RATE_2);                               // 0xC691 app 2.4kbps
         rf12_control(0x9830);                                         // 60khz freq shift
-        rf12_sleep(RF12_WAKEUP);                                      // Wake up radio
 #endif
+
+        if (((millis() > salusMillis) || needOff)) {                  // Is a Salus Off required?
+            needOff = false;
+            salusMillis = millis() + salusTimeout;
+            // Serial.println("Sending Salus off");
+            rf12_sleep(RF12_WAKEUP);
+//            while (!rf12_canSend())
+            rf12_skip_hdr();                                          // Omit Jeelib header 2 bytes on transmission
+            rf12_sendStart(0, &salusOff, 4);                          // Transmit the Salus off command
+            rf12_sendWait(1);                                         // Wait for transmission complete
+            rf12_sleep(RF12_SLEEP);
+            payload.salusAddress = 0;                                 // Note the prolonged loss of contact
+            payload.salusCommand = OFF | 0x80;                        // Update the Jee world status
+        }                                                             // 0x80 indicates Jeenode commanded off
+                
+    if (WatchSALUS) {        
+        rf12_sleep(RF12_WAKEUP);                                      // Wake up radio
         rf12_recvDone();                                              // Enter receive mode
         // Serial.println("Waiting for Salus");
         // Serial.flush();
-        elapsed = elapsed + (TEMPCHECK - (Sleepy::idleSomeTime(TEMPCHECK)));  // Check temperatures every minute
+    
+        elapsed = elapsed + (TEMPCHECK - (Sleepy::idleSomeTime(TEMPCHECK)));      // Check temperatures every minute
 
 #if !RF69_COMPAT
         delay(10);                                                            // Wait for the data to be available
-        if (rf12_buf[4] == 90) {
+        if (rf12_buf[4] == 90)
 #else
-        if (rf12_recvDone()) {
+        if (rf12_recvDone())
 #endif
+            {
             if ((rf12_buf[0] == 212 && ((rf12_buf[1] | rf12_buf[2]) == rf12_buf[3]) 
               && rf12_buf[4] == 90/* && rf12_buf[1] == SALUSID*/)) {      // Capture all Salus packets
                 rf12_buf[4] = ~90;
@@ -391,32 +422,18 @@ void loop () {
                 // Serial.println();
             }
         }
+    } else  {
+      rf12_sleep(RF12_SLEEP);                                                   // Sleep the radio
+      elapsed = elapsed + (TEMPCHECK - (Sleepy::idleSomeTime(TEMPCHECK)));      // Check temperatures every minute
+    }
 
-
-        if (((millis() > salusMillis) || needOff)) {                  // Is a Salus Off required?
-            needOff = false;
-            salusMillis = millis() + salusTimeout;
-            // Serial.println("Sending Salus off");
-            rf12_sleep(RF12_WAKEUP);
-//            while (!rf12_canSend())
-            rf12_skip_hdr();                                          // Omit Jeelib header 2 bytes on transmission
-            rf12_sendStart(0, &salusOff, 4);                          // Transmit the Salus off command
-            rf12_sendWait(1);                                         // Wait for transmission complete
-            rf12_sleep(RF12_SLEEP);                                   // Sleep the radio
-            payload.salusAddress = 0;                                 // Note the prolonged loss of contact
-            payload.salusCommand = OFF | 0x80;                        // Update the Jee world status
-        }                                                             // 0x80 indicates Jeenode commanded off
-        
-    } else {
-        elapsed = elapsed + (TEMPCHECK - (Sleepy::idleSomeTime(TEMPCHECK)));  // Check temperatures every minute
-    }    
     if (elapsed >= TEMPCHECK) {
         digitalWrite(17, HIGH);                                   // Power up the DS18B20's
-        Sleepy::loseSomeTime(10); 
+        Sleepy::loseSomeTime((10 + 16)); 
         ds.reset();
         ds.skip();                                                // Next command to all devices
         ds.write(0x44);                                           // Start all temperature conversions.
-        Sleepy::loseSomeTime(1000);                               // Wait for the data to be available
+        Sleepy::loseSomeTime((750 + 16));                               // Wait for the data to be available
 
         payload.ColdFeed = getTemp(ColdFeed);
         // Serial.print("Cold Feed:");
@@ -437,7 +454,6 @@ void loop () {
         digitalWrite(17, LOW);                                     // Power down the DS18B20's    
         // Serial.flush();
 
-     //   if ((payload.TankCoilReturn + 2) > payload.BoilerFeed) needOff = true;
         word thisCRC = calcCrc(&payload.voltage, sizeof payload - 1);
         if (thisCRC != lastCRC) {
             // Serial.println(thisCRC);
@@ -457,6 +473,16 @@ void loop () {
                     // Serial.println(" attempt(s)");
                 } else {
                     // Serial.println("Aborted");
+                }
+                
+                if (payload.BoilerFeed >= maxBoiler) {
+                    // Serial.println("Boiler feed above threshold");
+                    needOff = true;
+                }
+
+                if (payload.CentralHeatingReturn >= maxCH) {
+                    // Serial.println("C/H Return above threshold");
+                    needOff = true;
                 }
                // Serial.flush();             
             } else {
