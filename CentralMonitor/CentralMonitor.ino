@@ -8,6 +8,7 @@
 #include <OneWire.h>
 #include <avr/eeprom.h>
 #include <util/crc16.h>
+
 #define crc_update      _crc16_update
 #define AIO2 9 // d9
 #define SALUSID 16
@@ -75,6 +76,8 @@ ISR(WDT_vect) { Sleepy::watchdogEvent(); }
 //
 /////////////////////////////////////////////////////////////////////////////////////
 struct payload{                                                                    //
+byte badCRC:  6;      // Running count of CRC mismatches
+byte packetType:  2;  // High order packet type bits
 byte command;         // Last command received in ACK
 byte attempts: 4;     // transmission attempts
 byte count: 4;        // packet count
@@ -86,7 +89,8 @@ unsigned int ColdFeed;
 unsigned int BoilerFeed;
 unsigned int CentralHeatingReturn;
 unsigned int TankCoilReturn;
-//unsigned int HotFeed;
+#define BASIC_PAYLOAD_SIZE 15
+char messages[64 - BASIC_PAYLOAD_SIZE];
 } payload;
 //
 /////////////////////////////////////////////////////////////////////////////////////
@@ -115,6 +119,8 @@ static eeprom settings;
 
 #define ACK_TIME        49  // number of milliseconds - to wait for an ack, an initial 50ms
 #define RETRY_LIMIT      7
+
+byte payloadSize = BASIC_PAYLOAD_SIZE;
 byte NodeID = 16;
 word lastCRC;
 
@@ -123,9 +129,9 @@ static byte sendACK() {
       delay(t * t);                   // Increasing the gap between retransmissions
       payload.attempts = t;
       rf12_sleep(RF12_WAKEUP);
-      if(rf12_recvDone()) {
-          Serial.print("Discarded: ");                // Flush the buffer
-          for (byte i = 0; i < 8; i++) {;
+      if (rf12_recvDone()) {
+          Serial.print("Discarded: ");             // Flush the buffer
+          for (byte i = 0; i < 8; i++) {
               showByte(rf12_buf[i]);
               rf12_buf[i] = 0xFF;                     // Paint it over
               printOneChar(' ');
@@ -133,19 +139,20 @@ static byte sendACK() {
           Serial.println();
           Serial.flush(); 
       }
-      rf12_sendStart(RF12_HDR_ACK, &payload, sizeof payload);
+      rf12_sendStart(RF12_HDR_ACK, &payload, payloadSize);
       byte acked = waitForAck(t * t); // Wait for increasingly longer time for the ACK
       if (acked) {
+          payloadSize = BASIC_PAYLOAD_SIZE;   // Reset basic packet length
           for (byte i = 0; i < 6; i++) {
               showByte(rf12_buf[i]);
               printOneChar(' ');
           }
           Serial.println();
-          if(rf12_buf[2] > 0) {
+          if (rf12_buf[2] > 0) {
               payload.command = rf12_buf[3];
               Serial.print("Command=");
               Serial.println(rf12_buf[3]);
-              switch(rf12_buf[3]) {
+              switch (rf12_buf[3]) {
                   case 1:
                       WatchSALUS = true;
                       payload.salusAddress = ~0;          // Salus monitoring restarted
@@ -176,10 +183,14 @@ static byte sendACK() {
                           break;
                       }
                       Serial.println("Unknown Command");
-//                      payload.command = 0;
+                      for (byte i = 0; i < 6; i++) {
+                          payload.messages [i] = rf12_buf[i];     // Return strange data with next packet
+                          payloadSize = BASIC_PAYLOAD_SIZE + 6;
+                          payload.packetType = 1;                         
+                      }
                       break;      
                   }
-          } // else payload.command = 0;
+          }
           return t;
       }
   }
@@ -194,12 +205,14 @@ static byte waitForAck(byte t) {
 
             Serial.print((ACK_TIME + t) - ackTimer.remaining());
             Serial.print("ms RX");
-            if(rf12_crc == 0 &&
-              // see http://talk.jeelabs.net/topic/811#post-4712
-              rf12_hdr == (RF12_HDR_DST | RF12_HDR_CTL | NodeID)) {
+            
+            if (rf12_crc == 0) {
+                // see http://talk.jeelabs.net/topic/811#post-4712
+                if (rf12_hdr == (RF12_HDR_DST | RF12_HDR_CTL | NodeID)) {
                   Serial.print(" ACK ");
+                  
                 } else {
-                    Serial.print("Noise: ");                // Flush the buffer
+                    Serial.print("Noise: ");             // Flush the buffer
                     for (byte i = 0; i < 8; i++) {;
                         showByte(rf12_buf[i]);
                         rf12_buf[i] = 0xFF;                 // Paint it over
@@ -207,7 +220,12 @@ static byte waitForAck(byte t) {
                     }
                     showStats();                                
                 }
-                return 1;
+            } else {
+                payload.badCRC++;
+                return 0;
+            }
+            
+            return 1;
         } 
         set_sleep_mode(SLEEP_MODE_IDLE);   // Wait a while for the reply?
         sleep_mode();
@@ -243,7 +261,9 @@ static void loadSettings () {
         Serial.println(crc, HEX);
         settings.maxBoiler = 4000;
         settings.maxReturn = 6500;
-    } else Serial.println("is good");
+    } else {
+        Serial.println("is good");
+    }
     Serial.print("Boiler threshold:");
     Serial.println(settings.maxBoiler);
     Serial.print("C/H return threshold:");
@@ -502,8 +522,8 @@ void loop () {
         Serial.print(" trend:");
         Serial.println(boilerTrend);
                         
-        if ((payload.BoilerFeed + boilerTrend) >= settings.maxBoiler) {
-            Serial.println("Boiler feed + trend above threshold");
+        if ((payload.BoilerFeed >= settings.maxBoiler) && (boilerTrend > 0)) {
+            Serial.println("Boiler feed && trend above threshold");
             needOff = true;
         }
 
@@ -516,8 +536,8 @@ void loop () {
         Serial.print(" trend:");
         Serial.println(returnTrend);
         
-        if ((payload.CentralHeatingReturn + returnTrend) >= settings.maxReturn) {
-            Serial.println("C/H Return + trend above threshold");
+        if ((payload.CentralHeatingReturn >= settings.maxReturn) && (returnTrend > 0)) {
+            Serial.println("C/H Return && trend above threshold");
              needOff = true;
         }
 
