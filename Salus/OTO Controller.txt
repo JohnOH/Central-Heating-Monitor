@@ -1,0 +1,34 @@
+Sync Sequence
+byte 4 = 2 with a checksum in byte 5 (byte 4 + x) == byte 5
+
+Setback Sequence
+byte 1 fixed at 166
+byte 2 is assigned at sync time, 217 below
+byte 3 is also allocated at sync time, could be an integer with byte 2
+byte 4 is command In/Out for various values
+byte 5 is command + a base value assigned during sync, 128 below.
+
+    ?212 166 163 106 0 179 151 132 179 106 170 170
+     212 165   8   0 0 202 8 120 5 120 5 50 171 23 29
+     212 166 163 106 0 179 104 163   
+Two degrees setback
+In  166 217 1 0 128,S
+Out 166 217 1 4 132,S
+
+Four degrees setback
+In  166 217 1 8 136,S
+Out 166 217 1 12 140,S
+
+Six degrees setback
+In  166,217,1,16,144,S
+Out 166,217,1,20,148,S
+
+Auto degrees setback
+In  166 217 1 24 152,S
+Out 166 217 1 28 156,S
+
+The current slide switch settings are transmitted when batteries are inserted.
+
+On powering up the boiler controller it goes into a learn mode where it will
+pair with the first device it receives. 
+
