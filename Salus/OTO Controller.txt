@@ -10,25 +10,47 @@ byte 5 is command + a base value assigned during sync, 128 below.
 
     ?212 166 163 106 0 179 151 132 179 106 170 170
      212 165   8   0 0 202 8 120 5 120 5 50 171 23 29
-     212 166 163 106 0 179 104 163   
+     212 166 163 106 0 179 104 163 
+     
+     166 163 106 0 179 S Come in
+     166 163 106 4 183 S Gone Out
+     
+    Command Byte-4 bit breakdown
+    0000 0010 This bit is set during sync process
+    0000 0100 The In/Out bit, true if Out
+    
+    Commands: 00/04 is for 2 degrees setback switch
+              08/12 is for 4 degrees setback switch
+              16/20 is for 6 degrees setback switch
+              24/28 is for Auto degrees setback switch
+    
+     
 Two degrees setback
 In  166 217 1 0 128,S
-Out 166 217 1 4 132,S
+Out 166 217 1 4 132 S
 
 Four degrees setback
-In  166 217 1 8 136,S
-Out 166 217 1 12 140,S
+In  166 217 1 8 136 S
+Out 166 217 1 12 140 S
 
 Six degrees setback
-In  166,217,1,16,144,S
-Out 166,217,1,20,148,S
+In  166 217 1 16 144 S
+Out 166 217 1 20 148 S
 
 Auto degrees setback
-In  166 217 1 24 152,S
-Out 166 217 1 28 156,S
+In  166 217 1 24 152 S
+Out 166 217 1 28 156 S
 
 The current slide switch settings are transmitted when batteries are inserted.
+When sync is triggered the current slide switch settings are also included.
 
 On powering up the boiler controller it goes into a learn mode where it will
-pair with the first device it receives. 
+pair with the first device it receives sending the pairing code 0x02 set. 
+Once paired  the controller remembers its partner, only requiring a single packet
+to stop the pairing LED from flashing on power up.
+
+The In/Out signal from the OTO needs to be repeated otherwise the Controller 
+drops out of setback mode. If the signal Out signal is not received after 
+one hour then setback is cancelled by the Controller.
+ 
 
