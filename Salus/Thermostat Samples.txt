@@ -1,0 +1,33 @@
+[16:19:59:485] D4 A5 08 00 20 34 08 78 05 CA 08 32 8A
+[16:20:00:743] Salus II Device:165 Addr:8 Command:32 2100:1400:2250:8A32
+
+[16:20:39:209] D4 A5 08 00 20 34 08 78 05 66 08 32 26
+[16:20:40:481] Salus II Device:165 Addr:8 Command:32 2100:1400:2150:2632
+
+[16:23:59:511] D4 A5 08 00 20 34 08 78 05 66 08 32 26
+[16:24:00:758] Salus II Device:165 Addr:8 Command:32 2100:1400:2150:2632
+
+[16:25:47:949] D4 A5 08 00 20 34 08 78 05 34 08 32 F4
+[16:25:49:225] Salus II Device:165 Addr:8 Command:32 2100:1400:2100:F432
+
+[16:35:31:947] D4 A5 08 00 00 66 08 78 05 02 08 32 D4
+[16:35:33:209] Salus II Device:165 Addr:8 Command:0 2150:1400:2050:D432
+
+If the *up* and *down* buttons are pressed together the display blanks but 
+transmissions continue as below:
+
+1660 Salus II Device:165 Addr:8 Type:64 0:0:0:1F32   
+?212 165 8 0 64 0 0 0 0 0 0 50 31 a=0 f=0 l=1 t=21 q=0% R=96.5dB T=0dB 11:17:41:396] L=18 (42dB)
+      A5 6 0 40 0 0 0 0 0 0 32 1F
+      A5060040000000000000321F
+      
+This might simplify cracking the CRC/XOR coding.
+
+Command Byte (5)
+When adjusting the thermostat, the Command byte has a value 0 if the new
+target temperature will cause the controller to switch off demand to the boiler.
+If the change will cause the controller to switch on demand then a Command
+value of 0x20 is used. The above only applies in the context of the thermostat.
+If setback is in effect the Controller will not switch on the boiler unless 
+the temperature set by the One Touch Override (OTO) is below the setback 
+temperature.
