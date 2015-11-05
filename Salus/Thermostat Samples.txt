@@ -18,9 +18,9 @@ transmissions continue as below:
 
 1660 Salus II Device:165 Addr:8 Type:64 0:0:0:1F32   
 ?212 165 8 0 64 0 0 0 0 0 0 50 31 a=0 f=0 l=1 t=21 q=0% R=96.5dB T=0dB 11:17:41:396] L=18 (42dB)
-      A5 6 0 40 0 0 0 0 0 0 32 1F
-      A5060040000000000000321F
-      
+      A5 8 0 40 0 0 0 0 0 0 32 1F
+      A5080040000000000000321F
+      A50800400000000000001F32
 This might simplify cracking the CRC/XOR coding.
 
 Command Byte (5)
@@ -31,3 +31,8 @@ value of 0x20 is used. The above only applies in the context of the thermostat.
 If setback is in effect the Controller will not switch on the boiler unless 
 the temperature set by the One Touch Override (OTO) is below the setback 
 temperature.
+
+Without manual operation of the up/down buttons the thermostat only transmits 
+its temperature readings every 10 minutes. If the temperature is changing 
+quickly this system will be sluggish to switch on/off the boilder demand. 
+Need to check what happens if the thermostat temperature/time window advances. 
