@@ -132,7 +132,7 @@ static eeprom settings;
 // 28 C9 C5 4D 4 00 00 04
 //////////////////////////
 
-#define ACK_TIME        49  // number of milliseconds - to wait for an ack, an initial 50ms
+#define ACK_TIME        100  // number of milliseconds - to wait for an ack, an initial 100ms
 #define RETRY_LIMIT      7
 
 byte payloadSize = BASIC_PAYLOAD_SIZE;
