@@ -3,6 +3,7 @@
 //                           // The above flag must be set similarly in RF12.cpp
 //                           // and RF69_avr.h
 ///////////////////////////////////////////////////////////////////////////////
+// 
 #include <JeeLib.h>
 #include <avr/sleep.h>
 #include <OneWire.h>
@@ -88,7 +89,7 @@ byte setBack: 2;      // True if a setback is pending
 byte packetType:  2;  // High order packet type bits
 byte attempts: 4;     // transmission attempts
 byte count: 4;        // packet count
-byte voltage;
+byte boiler_target;
 unsigned int salusAddress;
 byte salusCommand;
 byte salusNoise;
@@ -145,6 +146,8 @@ signed int boilerTrend;
 signed int returnTrend;
 
 static byte sendACK() {
+  payload.boiler_target = (settings.maxBoiler / 100);
+  
   for (byte t = 1; t <= RETRY_LIMIT; t++) {  
       delay(t * t);                   // Increasing the gap between retransmissions
       payload.attempts = t;
@@ -727,8 +730,8 @@ void loop () {
         }
         // Serial.flush();
 
-        word thisCRC = calcCrc(&payload.voltage, payloadSize - 3);
-        if ((thisCRC != lastCRC) || (txSkip > 9)) {
+//        word thisCRC = calcCrc(&payload.voltage, payloadSize - 3);
+//        if ((thisCRC != lastCRC) || (txSkip > 9)) {
             txSkip = 0;
             payload.count++;
             if (NodeID = rf12_configSilent()) {
@@ -745,7 +748,7 @@ void loop () {
                 if (tries) { 
                     // Serial.print(tries);
                     // Serial.println(" attempt(s)");
-                    lastCRC = thisCRC;
+//                    lastCRC = thisCRC;
                 } else {
                     // Serial.print("Packet #");
                     // Serial.print(payload.count);
@@ -760,18 +763,19 @@ void loop () {
                   }  
             }
             elapsed = 0; 
-        } else {
+/*        } else {
           txSkip++;
           // Serial.print("Data unchanged, skipped transmission #");
           // Serial.println(txSkip);
           // Serial.flush();
-        }
+//        }
+*/
     } else {
           // Serial.print(elapsed);
           // Serial.println(" seconds elapsed");
           // Serial.flush();
     }
-
+/*
     // Serial.print("Voltage:");
     payload.voltage = readVcc();
     // Serial.println(payload.voltage);
@@ -786,5 +790,6 @@ void loop () {
         cli();
         Sleepy::powerDown();
     }
+*/
 } // Loop
 
