@@ -1,0 +1,5 @@
+https://api.thingspeak.com/channels.json api_key=KGKMVIZ7K5XPCJOOname=Office=7
+
+ wget -q -O- "https://api.thingspeak.com/update?key=KGKMVIZ7K5XPCJOO&field1=7"
+ 
+ wget -q -O- "https://api.thingspeak.com/update?key=O64IA4X1ZIVU9DWN&field2=$setBack&field4=$Voltage&field5=$ColdFeed&field6=$BoilerFeed&field7=$CHreturn&field8=$TCreturn" > /dev/null 2>&1

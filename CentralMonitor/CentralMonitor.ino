@@ -42,19 +42,20 @@ OneWire  ds(PD7); // DIO4
  * RF Salus thermostat commands and retransmit them in RF12 format to the
  * data collection server. The Salus equipment has direct control of the
  * heating demand but this Jeenode is able to send Salus commands,
- * typically OFF commands to optimise heating performance and gas consumption.
+ * typically SETBACK commands to optimise heating performance and gas consumption.
  * 
  * In addition to the above various temperatures around the heating system 
  * will be collected as below. Where the central heating return approaches 
  * the boiler feed temperature a Salus command will be issued to cancel
- * the central heating demand. This temperature difference is where the tuning
- * of gas consumption may be acheived. 
+ * the central heating demand by issuing a SETBACK to the boiler controller. 
+ * This temperature difference is where the tuning of gas consumption may be acheived. 
  * It should be noted that the Salus thermostat will repeat its instructions 
- * to the boiler based on temperature and every 10 minutes. If this sketch
+ * to the boiler based on temperature and every 10 minutes. The SETBACK command must 
+ * also be refreshed every 10 minutes to maintain boiler status. If this sketch
  * cancels the heating demand the demand will be reasserted by the thermostat if 
  * conditions dictate.
  * 
- * If the Salus thermostat fails to deliver its demand status on its regular
+ * <review> If the Salus thermostat fails to deliver its demand status on its regular
  * schedule then this sketch will cancel the central heating demand.
  */
 
@@ -89,7 +90,7 @@ byte setBack: 2;      // True if a setback is pending
 byte packetType:  2;  // High order packet type bits
 byte attempts: 4;     // transmission attempts
 byte count: 4;        // packet count
-byte boiler_target;
+byte voltage;
 unsigned int salusAddress;
 byte salusCommand;
 byte salusNoise;
@@ -100,7 +101,11 @@ unsigned int ColdFeed;
 unsigned int BoilerFeed;
 unsigned int CentralHeatingReturn;
 unsigned int TankCoilReturn;
-#define BASIC_PAYLOAD_SIZE 22
+unsigned int boiler_target;
+unsigned int overRun;   // Temperature overrun
+unsigned int underRun;  // Temperature underrun
+unsigned int onTarget;  // Temperature correct
+#define BASIC_PAYLOAD_SIZE 30
 char messages[64 - BASIC_PAYLOAD_SIZE];
 } payload;
 //
@@ -146,7 +151,7 @@ signed int boilerTrend;
 signed int returnTrend;
 
 static byte sendACK() {
-  payload.boiler_target = (settings.maxBoiler / 100);
+  payload.boiler_target = settings.maxBoiler;
   
   for (byte t = 1; t <= RETRY_LIMIT; t++) {  
       delay(t * t);                   // Increasing the gap between retransmissions
@@ -162,7 +167,16 @@ static byte sendACK() {
           // Serial.println();
           // Serial.flush(); 
       }
+      
+      while (!(rf12_canSend())) {
+        // Serial.print("Airwaves Busy");
+        Sleepy::loseSomeTime((50)); 
+      }
+        
+      // Serial.println("TX Start");
       rf12_sendStart(RF12_HDR_ACK, &payload, payloadSize);
+      // Serial.println("TX Done");
+      // Serial.flush();      
       byte acked = waitForAck(t * t); // Wait for increasingly longer time for the ACK
       if (acked) {
           payloadSize = BASIC_PAYLOAD_SIZE;   // Packet was ACK'ed by someone
@@ -173,7 +187,7 @@ static byte sendACK() {
               printOneChar(' ');
           }
           // Serial.println();
-          if (rf12_buf[2] > 0) {
+          if (rf12_buf[2] > 0) {                          // Non-zero length ACK packet?
               payload.command = rf12_buf[3];
               // Serial.print("Command=");
               // Serial.println(rf12_buf[3]);
@@ -187,16 +201,8 @@ static byte sendACK() {
               
               switch (rf12_buf[3]) {
                   case 1:
-                      settings.WatchSALUS = true;
-                      payload.salusAddress = ~0;          // Salus monitoring restarted
-                      payload.salusCommand = 0;           // ditto
-                      // Serial.println("Salus Monitoring On");
-                      break;
-                  case 2:
-                      settings.WatchSALUS = false;
-                      payload.salusAddress = 0;           // Salus monitoring suspended
-                      payload.salusCommand = 0;           // ditto
-                      // Serial.println("Salus Monitoring Off");
+                      payload.overRun = payload.underRun = payload.onTarget = 0;                      
+                      // Serial.println("Underrun/Overrun/On target cleared");
                       break;
                   case 16:
                       settings.tempTrack = -300;                    // -3.00 degree when testing temperatures
@@ -228,21 +234,22 @@ static byte sendACK() {
                       saveSettings();
                       break;      
                   default:
-                      if (rf12_buf[3] > 100 && rf12_buf[3] < 200){
+                      if (rf12_buf[3] > 100 && rf12_buf[3] < 200) {
                           settings.maxBoiler = (rf12_buf[3] - 100) * 100;
                           // Serial.print("Setting Boiler Feed Threshold:");
                           // Serial.println(settings.maxBoiler);
                           break;  
                       }
-                      if (rf12_buf[3] > 200 && rf12_buf[3] < 255){
+                      if (rf12_buf[3] > 200 && rf12_buf[3] < 255) {
                           settings.maxReturn = (rf12_buf[3] - 200) * 100;
                           // Serial.print("Setting Central Heating Return Threshold:");
                           // Serial.println(settings.maxReturn);
                           break;
                       }
                       // Serial.println("Unknown Command");
-                      break;      
-                  }
+                      break;
+
+                  } // end switch
           }
           return t;
       }
@@ -567,13 +574,8 @@ void loop () {
         // Check temperatures every minute
 
 #if !RF69_COMPAT
-        // Serial.println(rf12_recvDone());                                      // Tickle the state machine
         delay(120);                                                             // Wait for the full packet to be available
-//        if (rf12_buf[4] == 90)    // FIXME for RFM12B
-//          // Serial.print("Recv:");
-//          while(!(rf12_recvDone()));
 #endif
-//#else
         if (rf12_recvDone() && rf12_buf[0] == 212)
             {
                 rf12_sleep(RF12_SLEEP);
@@ -618,11 +620,18 @@ void loop () {
                         payload.currentTemp = ((rf12_buf[6] << 8) | rf12_buf[5]);
                         // Serial.print(" Current="); // Serial.print(payload.currentTemp);
                         payload.lowestTemp = ((rf12_buf[8] << 8) | rf12_buf[7]);
-                        // Serial.print(" Lowest="); // Serial.print(payload.lowestTemp);
+                        // Serial.print(" Lowest=");  // Serial.print(payload.lowestTemp);
                         payload.targetTemp = ((rf12_buf[10] << 8) | rf12_buf[9]);
-                        // Serial.print(" Target="); // Serial.print(payload.targetTemp);
-                        payload.packetType |= 2;    // Indicate new data
-                        crc = ((rf12_buf[12] << 8) | rf12_buf[11]);
+                        // Serial.print(" Target=");  // Serial.print(payload.targetTemp);
+                        payload.packetType |= 2;      // Indicate new data
+                        
+                        if (payload.lowestTemp != payload.targetTemp) { // Typical daytime setting
+                            if (payload.currentTemp < payload.targetTemp) payload.underRun++;
+                            if (payload.currentTemp > payload.targetTemp) payload.overRun++;
+                            if (payload.currentTemp == payload.targetTemp) payload.onTarget++;
+                        }
+                        
+//                        crc = ((rf12_buf[12] << 8) | rf12_buf[11]);
                         // Serial.print(" crc=0x"); // Serial.print(crc, HEX);
 /*                        if (payload.salusCommand == 32) {
                             setback = false;
@@ -743,6 +752,7 @@ void loop () {
                 // Serial.println(payloadSize);
                 // Serial.flush();
             
+                Sleepy::loseSomeTime(1000); // Allow time for Jeelink receiver to recover from Salus packets.
                 byte tries = sendACK();
             
                 if (tries) { 
@@ -775,7 +785,7 @@ void loop () {
           // Serial.println(" seconds elapsed");
           // Serial.flush();
     }
-/*
+
     // Serial.print("Voltage:");
     payload.voltage = readVcc();
     // Serial.println(payload.voltage);
@@ -790,6 +800,6 @@ void loop () {
         cli();
         Sleepy::powerDown();
     }
-*/
+
 } // Loop
 
