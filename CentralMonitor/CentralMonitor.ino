@@ -16,7 +16,7 @@
 #define SALUSFREQUENCY 1660
 #define ON  1
 #define OFF 2
-#define TEMPCHECK 60        // Check the temperatures every 60 seconds
+#define TEMPCHECK 9        // Check the temperatures every 9 seconds
 
 #define REG_BITRATEMSB 0x03 // RFM69 only, 0x02, // BitRateMsb, data rate = 49,261 khz
 #define REG_BITRATELSB 0x04 // RFM69 only, 0x8A, // BitRateLsb divider = 32 MHz / 650 == 49,230 khz
@@ -116,7 +116,8 @@ typedef struct {
     byte spare:7;
     unsigned int maxBoiler;
     unsigned int maxReturn;
-    signed int tempTrack;
+    byte txSkip;
+    byte spare2;	// Unused
     unsigned int addrOTO;
     byte checkOTO;
     word crc;
@@ -204,27 +205,22 @@ static byte sendACK() {
                       payload.overRun = payload.underRun = payload.onTarget = 0;                      
                       // Serial.println("Underrun/Overrun/On target cleared");
                       break;
-                  case 16:
-                      settings.tempTrack = -300;                    // -3.00 degree when testing temperatures
-                      break;
-                  case 17:
-                      settings.tempTrack = -225;                    // -2.25 degree when testing temperatures
-                      break;
-                  case 18:
-                      settings.tempTrack = -150;                    // -1.50 degree when testing temperatures
-                      break;
-                  case 19:
-                      settings.tempTrack = -75;                     // -0.75 degrees when testing temperatures
-                      break;
-                  case 20:
-                      settings.tempTrack = 0;
-                      break;
-                  case 21:
-                      settings.tempTrack = 150;                     // +1.50 degree when testing temperatures
-                      break;
-                  case 22:
-                      settings.tempTrack = 200;                     // +2.00 degrees when testing temperatures
-                      break;
+                  case 2:
+                  		settings.txSkip = 2;
+                  		// Serial.println("TX Skip 2");
+                  		break;
+                  case 6:
+                  		settings.txSkip = 6;
+                  		// Serial.println("TX Skip 6");
+                  		break;
+                  case 12:
+                  		settings.txSkip = 12;
+                  		// Serial.println("TX Skip 12");
+                  		break;
+                  case 30:
+                  		settings.txSkip = 30;
+                  		// Serial.println("TX Skip 30");
+                  		break;
                   case 89:  // Capture OTO code
                       getOTO = true;
                       // Serial.println("Learning OTO codes");
@@ -323,7 +319,7 @@ static void loadSettings () {
         settings.WatchSALUS = true;
         settings.maxBoiler = 4500;
         settings.maxReturn = 6500;
-        settings.tempTrack = 200;
+        settings.txSkip = 6;
     } else {
         // Serial.println("is good");
     }
@@ -530,7 +526,6 @@ unsigned int getTemp(byte* sensor) {
 }
 
 void loop () {
-//        payload.salusCommand = 16;
 /*
  * Setup to receive Salus transmissions
  */
@@ -630,7 +625,7 @@ void loop () {
                             if (payload.currentTemp > payload.targetTemp) payload.overRun++;
                             if (payload.currentTemp == payload.targetTemp) payload.onTarget++;
                         }
-                        
+                        txSkip = ~0;	// Trigger a transmission
 //                        crc = ((rf12_buf[12] << 8) | rf12_buf[11]);
                         // Serial.print(" crc=0x"); // Serial.print(crc, HEX);
 /*                        if (payload.salusCommand == 32) {
@@ -687,7 +682,6 @@ void loop () {
       // Serial.flush();
       rf12_sleep(RF12_SLEEP);                                                   // Sleep the radio
       if (!commandResponse) elapsed = elapsed + (TEMPCHECK - (Sleepy::idleSomeTime(TEMPCHECK)));      
-      // Check temperatures every minute
     }
 
     if ((elapsed >= TEMPCHECK) || (commandResponse)) {
@@ -724,23 +718,29 @@ void loop () {
         // Serial.print("Coil Return:");
         // Serial.println(payload.TankCoilReturn);
 
-        digitalWrite(17, LOW);                                      // Power down the DS18B20's    
+        digitalWrite(17, LOW);									// Power down the DS18B20    
 
-        if (boilerTrend > 0) {   
-            if (payload.BoilerFeed > (settings.maxBoiler + settings.tempTrack)) {                // Heats up much faster            
-                // Serial.println("Above threshold");
-                needSetback = true;
-                payload.setBack = 1;
-              }
-        } else if (payload.BoilerFeed < (settings.maxBoiler + settings.tempTrack)) {             // than it cools down!             
-            // Serial.println("Below threshold");
-            needSetback = false;
-            payload.setBack = 0;          
+        if (boilerTrend > 0) {
+        	if ((payload.currentTemp + 50) >= payload.targetTemp) {          
+                // Serial.println("More than half a degree under target");
+            	if (payload.BoilerFeed > settings.maxBoiler) {	// Heats up much faster            
+                	// Serial.println("Above threshold");
+                	if (!(needSetback)) txSkip = ~0;
+                	needSetback = true;
+                	payload.setBack = 1;
+                }
+            }
+        } else 
+        	if ((payload.BoilerFeed < settings.maxBoiler) || (payload.currentTemp + 50) 
+        	  < payload.targetTemp) {								// than it cools down!             
+        	// Serial.println("Below threshold or more than half a degree under target");
+            if (needSetback) txSkip = ~0;
+        	needSetback = false;
+        	payload.setBack = 0; 
         }
         // Serial.flush();
 
-//        word thisCRC = calcCrc(&payload.voltage, payloadSize - 3);
-//        if ((thisCRC != lastCRC) || (txSkip > 9)) {
+        if (txSkip > settings.txSkip) {
             txSkip = 0;
             payload.count++;
             if (NodeID = rf12_configSilent()) {
@@ -758,7 +758,6 @@ void loop () {
                 if (tries) { 
                     // Serial.print(tries);
                     // Serial.println(" attempt(s)");
-//                    lastCRC = thisCRC;
                 } else {
                     // Serial.print("Packet #");
                     // Serial.print(payload.count);
@@ -773,13 +772,12 @@ void loop () {
                   }  
             }
             elapsed = 0; 
-/*        } else {
+        } else {
           txSkip++;
-          // Serial.print("Data unchanged, skipped transmission #");
+          // Serial.print("Skipped transmission #");
           // Serial.println(txSkip);
           // Serial.flush();
-//        }
-*/
+        }
     } else {
           // Serial.print(elapsed);
           // Serial.println(" seconds elapsed");
