@@ -86,7 +86,8 @@ ISR(WDT_vect) { Sleepy::watchdogEvent(); }
 struct payload{                                                                    //
 byte command;         // Last command received in ACK
 byte badCRC:  4;      // Running count of CRC mismatches
-byte setBack: 2;      // True if a setback is pending
+byte tracking:	1;	  // True if we are tracking and capping boiler output
+byte setBack: 1;      // True if a setback is pending
 byte packetType:  2;  // High order packet type bits
 byte attempts: 4;     // transmission attempts
 byte count: 4;        // packet count
@@ -105,7 +106,7 @@ unsigned int boiler_target;
 unsigned int overRun;   // Temperature overrun
 unsigned int underRun;  // Temperature underrun
 unsigned int onTarget;  // Temperature correct
-#define BASIC_PAYLOAD_SIZE 30
+#define BASIC_PAYLOAD_SIZE 24
 char messages[64 - BASIC_PAYLOAD_SIZE];
 } payload;
 //
@@ -113,7 +114,8 @@ char messages[64 - BASIC_PAYLOAD_SIZE];
 typedef struct {
     byte start;
     byte WatchSALUS:1;
-    byte spare:7;
+    byte tracking:1;
+    byte spare:6;
     unsigned int maxBoiler;
     unsigned int maxReturn;
     byte txSkip;
@@ -153,6 +155,7 @@ signed int returnTrend;
 
 static byte sendACK() {
   payload.boiler_target = settings.maxBoiler;
+  payload.tracking = settings.tracking;
   
   for (byte t = 1; t <= RETRY_LIMIT; t++) {  
       delay(t * t);                   // Increasing the gap between retransmissions
@@ -212,6 +215,14 @@ static byte sendACK() {
                   case 6:
                   		settings.txSkip = 6;
                   		// Serial.println("TX Skip 6");
+                  		break;
+                  case 10:
+                  		settings.tracking = false;
+                  		// Serial.println("Tracking off");
+                  		break;
+                  case 11:
+                  		settings.tracking = true;
+                  		// Serial.println("Tracking on");
                   		break;
                   case 12:
                   		settings.txSkip = 12;
@@ -718,28 +729,34 @@ void loop () {
         // Serial.print("Coil Return:");
         // Serial.println(payload.TankCoilReturn);
 
-        digitalWrite(17, LOW);									// Power down the DS18B20    
+        digitalWrite(17, LOW);	// Power down the DS18B20    
 
-        if (boilerTrend > 0) {
-        	if ((payload.currentTemp + 50) >= payload.targetTemp) {          
-                // Serial.println("More than half a degree under target");
-            	if (payload.BoilerFeed > settings.maxBoiler) {	// Heats up much faster            
-                	// Serial.println("Above threshold");
-                	if (!(needSetback)) txSkip = ~0;
-                	needSetback = true;
-                	payload.setBack = 1;
-                }
-            }
-        } else 
-        	if ((payload.BoilerFeed < settings.maxBoiler) || (payload.currentTemp + 50) 
-        	  < payload.targetTemp) {								// than it cools down!             
-        	// Serial.println("Below threshold or more than half a degree under target");
-            if (needSetback) txSkip = ~0;
-        	needSetback = false;
-        	payload.setBack = 0; 
-        }
-        // Serial.flush();
-
+		if (settings.tracking) {
+			if (boilerTrend > 0) {
+				if ((payload.currentTemp + 50) >= payload.targetTemp) {			 
+					// Serial.println("More than half a degree under target");
+					if (payload.BoilerFeed >= settings.maxBoiler) {	// Heats up much faster			   
+						// Serial.println("Above threshold");
+						if (!(needSetback)) txSkip = ~0;
+						needSetback = true;
+						payload.setBack = 1;
+					}
+				}
+			} else 
+				if ((payload.BoilerFeed < settings.maxBoiler) || (payload.currentTemp + 50) 
+				  < payload.targetTemp) {							// than it cools down!			   
+				// Serial.println("Below threshold or more than half a degree under target");
+				if (needSetback) txSkip = ~0;
+				needSetback = false;
+				payload.setBack = 0; 
+			}
+			// Serial.flush();
+		} else {
+			needSetback = true;
+			payload.setBack = 1;
+			// Serial.println("Tracking disabled");
+		}	// tracking		
+		
         if (txSkip > settings.txSkip) {
             txSkip = 0;
             payload.count++;
