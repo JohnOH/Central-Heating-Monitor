@@ -204,18 +204,6 @@ static byte sendACK() {
               }
               
               switch (rf12_buf[3]) {
-                  case 1:
-                      payload.overRun = payload.underRun = payload.onTarget = 0;                      
-                      // Serial.println("Underrun/Overrun/On target cleared");
-                      break;
-                  case 2:
-                  		settings.txSkip = 2;
-                  		// Serial.println("TX Skip 2");
-                  		break;
-                  case 6:
-                  		settings.txSkip = 6;
-                  		// Serial.println("TX Skip 6");
-                  		break;
                   case 10:
                   		settings.tracking = false;
                   		// Serial.println("Tracking off");
@@ -241,6 +229,11 @@ static byte sendACK() {
                       saveSettings();
                       break;      
                   default:
+                      if (rf12_buf[3] > 0 && rf12_buf[3] < 10) {
+                          settings.maxBoiler = (((settings.maxBoiler / 100) * 100) + (rf12_buf[3] * 10));
+                          // Serial.print("Setting Boiler Feed Threshold:");
+                          // Serial.println(settings.maxBoiler);
+                          break;  
                       if (rf12_buf[3] > 100 && rf12_buf[3] < 200) {
                           settings.maxBoiler = (rf12_buf[3] - 100) * 100;
                           // Serial.print("Setting Boiler Feed Threshold:");
@@ -462,7 +455,7 @@ void setup () {
 
   pinMode(17, OUTPUT);      // Set the pin, AIO4 - Power the DS18B20's
   digitalWrite(17, HIGH);   // Power up the DS18B20's
-  Sleepy::loseSomeTime((100 + 16));
+  Sleepy::loseSomeTime((200 + 16));
 
 /// Configure the DS18B20 ///
   ds.reset();               // Set for 12 bit measurements //
@@ -479,7 +472,7 @@ void setup () {
   ds.skip();                // Next command to all devices
   ds.write(0x48);           // Set Config
 */
-  Sleepy::loseSomeTime((100 + 16));// Wait for copy to complete
+  Sleepy::loseSomeTime((200 + 16));// Wait for copy to complete
   digitalWrite(17, LOW);    // Power down the DS18B20's    
 
   } //  Setup
@@ -635,6 +628,9 @@ void loop () {
                             if (payload.currentTemp < payload.targetTemp) payload.underRun++;
                             if (payload.currentTemp > payload.targetTemp) payload.overRun++;
                             if (payload.currentTemp == payload.targetTemp) payload.onTarget++;
+                        } else {
+                        	// Clear temperature mismatch counters
+                        	payload.underRun = payload.overRun = payload.onTarget = 0;
                         }
                         txSkip = ~0;	// Trigger a transmission
 //                        crc = ((rf12_buf[12] << 8) | rf12_buf[11]);
@@ -697,11 +693,11 @@ void loop () {
 
     if ((elapsed >= TEMPCHECK) || (commandResponse)) {
         digitalWrite(17, HIGH);                                   // Power up the DS18B20's
-        Sleepy::loseSomeTime((50)); 
+        Sleepy::loseSomeTime((200)); 
         ds.reset();
         ds.skip();                                                // Next command to all devices
         ds.write(0x44);                                           // Start all temperature conversions.
-        Sleepy::loseSomeTime((750));                              // Wait for the data to be available
+        Sleepy::loseSomeTime((800));                              // Wait for the data to be available
 
         payload.ColdFeed = getTemp(ColdFeed);
         // Serial.print("Cold Feed:");
