@@ -36,11 +36,12 @@ Without manual operation of the up/down buttons the thermostat only transmits
 its temperature readings every 10 minutes. If the temperature is changing 
 quickly this system will be sluggish to switch on/off the boilder demand. 
 Need to check what happens if the thermostat temperature/time window advances. 
-If the temperarature/time wondow changes update is not transmitted, changes
+If the temperature/time window changes update is not transmitted, changes
 only notified at next 10 minute interval transmission.
 
 Command byte:
 0 appears to mean reached temperature
 16 appears to mean above desired temperature
-32 appears to mean below desired temperature and triggers boiler.
+32 appears to mean below desired temperature and triggers boiler
+64 appears to mean that the thermostat has been suspended, pressed up & down together to put the lights out.
  
