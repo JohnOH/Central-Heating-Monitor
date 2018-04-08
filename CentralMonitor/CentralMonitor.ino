@@ -60,8 +60,9 @@ OneWire  ds(PD7); // DIO4
  *
  * 13/04/2017 Tidy up lots of problems hearing Salus commands
  */
- 
-volatile unsigned int elapsedSeconds;	// 18 hours before overflow
+unsigned long minute = 61;
+unsigned long setbackMax = 61 * 15; 
+volatile unsigned long elapsedSeconds, nextScheduled, setbackTimer;
 ISR(TIMER1_COMPA_vect){
 	elapsedSeconds++;
 }
@@ -144,7 +145,7 @@ static eeprom settings;
 //////////////////////////
 
 #define ACK_TIME        100  // number of milliseconds - to wait for an ack, an initial 100ms
-#define RETRY_LIMIT      7
+#define RETRY_LIMIT      15
 
 byte payloadSize = BASIC_PAYLOAD_SIZE;
 byte NodeID = 16;
@@ -152,8 +153,8 @@ word lastCRC;
 
 byte getOTO = false;
 byte dataChanged = true;
-signed int boilerTrend;
-signed int returnTrend;
+//signed int boilerTrend;
+//signed int returnTrend;
 
 static byte sendACK() {
 payload.boiler_target = settings.maxBoiler;
@@ -210,6 +211,8 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                   		break;
 				case 11:
                   		settings.tracking = true;
+						setbackTimer = elapsedSeconds;
+						
                   		 //Serial.println("Tracking on");
                   		break;
 /*				case 12:
@@ -427,6 +430,21 @@ void checkSetback () {
                 payload.setBack = 1;
                 setback = true;
                 dataChanged = true;
+                setbackTimer = elapsedSeconds + setbackMax;
+            } 
+            else if ((settings.tracking) && (elapsedSeconds > setbackTimer)) {
+		        rf12_sleep(RF12_WAKEUP);                                  // All set, wake up radio
+                rf12_sendStart(0, &setBack0, 5);                          // Issue a OTO to cancel setback.
+                rf12_sendWait(1);                                         // Wait for transmission complete.
+                //Serial.println("Setback Cancelled");
+                rf12_sendStart(0, &setBack0, 5);                          // Issue a OTO to cancel setback.
+                rf12_sendWait(1);                                         // Wait for transmission complete.
+        		rf12_sleep(RF12_SLEEP);
+        		rf12_sleep(RF12_SLEEP);
+                backCount = 0;                                            // OTO every 10 mins
+                payload.setBack = 0;
+                setback = false;
+                dataChanged = true;            
             }
         }
         if (backCount > 600) {
@@ -506,8 +524,7 @@ void setup () {
 	ds.write(0x48);           // Set Config
 */
 	delay(200);
-//	digitalWrite(17, LOW);    // Power down the DS18B20's    
-
+	setbackTimer = elapsedSeconds + setbackMax;
   } //  Setup
   
 static void showStats() {
@@ -686,18 +703,18 @@ void loop () {
 	 //Serial.println(payload.ColdFeed);
 
 	payload.BoilerFeed = getTemp(BoilerFeed);
-	boilerTrend = 0;
-	if (previousBoilerFeed) boilerTrend = payload.BoilerFeed - previousBoilerFeed;
-		previousBoilerFeed = payload.BoilerFeed;
+//	boilerTrend = 0;
+//	if (previousBoilerFeed) boilerTrend = payload.BoilerFeed - previousBoilerFeed;
+//		previousBoilerFeed = payload.BoilerFeed;
          //Serial.print("Boiler Feed:");
          //Serial.print(payload.BoilerFeed);
          //Serial.print(" trend:");
          //Serial.println(boilerTrend);
                         
         payload.CentralHeatingReturn = (getTemp(CentralHeatingReturn));
-        returnTrend = 0;
-        if (previousReturn) returnTrend = payload.CentralHeatingReturn - previousReturn;
-        previousReturn = payload.CentralHeatingReturn;
+//        returnTrend = 0;
+//        if (previousReturn) returnTrend = payload.CentralHeatingReturn - previousReturn;
+//        previousReturn = payload.CentralHeatingReturn;
          //Serial.print("Heating Return:");
          //Serial.print(payload.CentralHeatingReturn);
          //Serial.print(" trend:");
@@ -708,25 +725,32 @@ void loop () {
          //Serial.println(payload.TankCoilReturn);
 
 		if (settings.tracking) {
-			if (boilerTrend > 0) {
-				if ((payload.currentTemp + 50) >= payload.targetTemp) {			 
-					 //Serial.println("More than half a degree under target");
-					if (payload.BoilerFeed >= settings.maxBoiler) {	// Heats up much faster			   
-						 //Serial.println("Above threshold");
-						needSetback = true;
-					}
-				}
-			} else 
-				if ((payload.BoilerFeed + 50) < settings.maxBoiler) { // than it cools down!			   
-					 //Serial.println("Below threshold");
-					needSetback = false;
-				}
-			 //Serial.flush();
+		
+			if ((payload.currentTemp + 50) >= payload.targetTemp) {
+				//Serial.println("Less than half a degree under target");
+				needSetback = true; }
+			else {
+				needSetback = false;
+			}
+			
+			if ((payload.BoilerFeed >= settings.maxBoiler) && 
+			   ((payload.currentTemp + 50) >= payload.targetTemp)) {	   
+				 //Serial.println("Above threshold && almost at target temperature");
+				needSetback = true;
+			}
+				
+			else if ((payload.BoilerFeed < settings.maxBoiler) &&
+					((payload.currentTemp + 50) < payload.targetTemp)) {			   
+				 //Serial.println("Below threshold && more than 0.5 down");
+				needSetback = false;
+			}
+			 
 		} else {
+		
 			needSetback = true;
-			 //Serial.println("Tracking disabled");
+			//Serial.println("Tracking disabled");
 		}	// settings.tracking		
-    
+		//Serial.flush();
 
         if (payloadReady) {
         	delay(2000);	// To be sure that Salus traffic has passed
@@ -747,30 +771,32 @@ void loop () {
         //Serial.println(backCount);
         //Serial.println(payload.setBack);
 		
-        if ((elapsedSeconds >= 60) || (dataChanged)) {	// approx 60 seconds
+        if ((elapsedSeconds >= nextScheduled) || (dataChanged)) {	// approx 60 seconds
+        	nextScheduled = elapsedSeconds + minute;
         	dataChanged = false;
             payload.count++;
             if (NodeID = rf12_configSilent()) {
+				rf12_control(0xC040);			// set low battery level to 2.2V
             	salusMode = false;
-                 Serial.print("Node ");
-                 Serial.print(NodeID);
-                 Serial.print(" sending packet #");
-                 Serial.print(payload.count);
-                 Serial.print(" length ");
-                 Serial.println(payloadSize);
-                 Serial.flush();
+                 //Serial.print("Node ");
+                 //Serial.print(NodeID);
+                 //Serial.print(" sending packet #");
+                 //Serial.print(payload.count);
+                 //Serial.print(" length ");
+                 //Serial.println(payloadSize);
+                 //Serial.flush();
             
                 byte tries = sendACK();
             
                 if (tries) { 
-                     Serial.print(tries);
-                     Serial.println(" attempt(s)");
+                     //Serial.print(tries);
+                     //Serial.println(" attempt(s)");
                 } else {
-                     Serial.print("Packet #");
-                     Serial.print(payload.count);
-                     Serial.println(" Aborted");
+                     //Serial.print("Packet #");
+                     //Serial.print(payload.count);
+                     //Serial.println(" Aborted");
                 }
-                Serial.flush();             
+                //Serial.flush();             
         } else {
             while( true ){
                 rf12_sleep(RF12_SLEEP);
@@ -778,7 +804,6 @@ void loop () {
 				delay(60000);
             }  
         }
-    	elapsedSeconds = 0;
     } 
 
 	 //Serial.print("Voltage:");
