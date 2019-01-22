@@ -9,6 +9,7 @@
 #include <OneWire.h>
 #include <avr/eeprom.h>
 #include <util/crc16.h>
+#include <avr/wdt.h>
 
 #define crc_update      _crc16_update
 #define AIO2 9 // d9
@@ -67,6 +68,8 @@ ISR(TIMER1_COMPA_vect){
 	elapsedSeconds++;
 	seconds++;
 }
+
+ISR(WDT_vect) { Sleepy::watchdogEvent(); }
 
 unsigned int loopCount;
 byte ColdFeed[8] = {0x28,0x53,0x4F,0x4E,0x04,0x00,0x00,0x84};
@@ -274,7 +277,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                       		Serial.println(payload.currentTemp);
 							break;
                       }
-                    	Serial.println("Unknown Command");
+						Serial.println("Unknown Command");
                       	break;
 
                   } // end switch
@@ -332,6 +335,7 @@ static void saveSettings () {
     for (byte i = 0; i < sizeof settings; ++i) {
         if (eeprom_read_byte(SETTINGS_EEPROM_ADDR + i) != p[i]) {
             eeprom_write_byte(SETTINGS_EEPROM_ADDR + i, p[i]);
+			wdt_reset();		// Hold off Watchdog: Eeprom writing is slow...
         }
     }
 } // saveSettings
@@ -344,7 +348,7 @@ static void loadSettings () {
         ((byte*) &settings)[i] = eeprom_read_byte(SETTINGS_EEPROM_ADDR + i);
         crc = crc_update(crc, ((byte*) &settings)[i]);
     }
-     Serial.print("Settings CRC ");
+    Serial.print("Settings CRC ");
     if (crc) {
         Serial.println("is bad, defaulting");
         Serial.println(crc, HEX);
@@ -355,10 +359,10 @@ static void loadSettings () {
     } else {
          Serial.println("is good");
     }
-     Serial.print("Boiler threshold:");
-     Serial.println(settings.maxBoiler);
-     Serial.print("C/H return threshold:");
-     Serial.println(settings.maxReturn);
+    Serial.print("Boiler threshold:");
+    Serial.println(settings.maxBoiler);
+    Serial.print("C/H return threshold:");
+    Serial.println(settings.maxReturn);
 } // loadSettings
 
 static void printOneChar (char c) {
@@ -544,6 +548,13 @@ void setup () {
 */
 	delay(200);
 	setbackTimer = elapsedSeconds + setbackMax;
+
+// Setup WatchDog
+	wdt_reset();   			// First thing, turn it off
+	MCUSR = 0;
+	wdt_disable();
+	wdt_enable(WDTO_8S);   // enable watchdogtimer
+
   } //  Setup
   
 static void showStats() {
@@ -603,6 +614,7 @@ byte payloadReady = false;
 static void waitRF12() {
 	seconds = 0;
     while (seconds < 10) {
+		wdt_reset();		// Hold off Watchdog
     	if( settings.WatchSALUS ) {	
     		if( rf12_recvDone() )	{
     			if( (rf12_buf[0] == 212) /*&& (rf12_buf[1] >= 160) && (rf12_buf[1] != 255)*/ ) {
@@ -795,6 +807,7 @@ void loop () {
         }            
 
 		checkSetback();
+		
         Serial.println(backCount);
         Serial.println(payload.setBack);
 		
@@ -849,4 +862,106 @@ void loop () {
     	cli();
     }
 } // Loop
-
+/*
+ Deg  Code
+ 40.0 100.0   
+ 40.2 101.0   
+ 40.4 102.0   
+ 40.6 103.0   
+ 40.8 104.0   
+ 41.0 105.0   
+ 41.2 106.0   
+ 41.4 107.0   
+ 41.6 108.0   
+ 41.8 109.0   
+ 42.0 110.0   
+ 42.2 111.0   
+ 42.4 112.0   
+ 42.6 113.0   
+ 42.8 114.0   
+ 43.0 115.0   
+ 43.2 116.0   
+ 43.4 117.0   
+ 43.6 118.0   
+ 43.8 119.0   
+ 44.0 120.0   
+ 44.2 121.0   
+ 44.4 122.0   
+ 44.6 123.0   
+ 44.8 124.0   
+ 45.0 125.0   
+ 45.2 126.0   
+ 45.4 127.0   
+ 45.6 128.0   
+ 45.8 129.0   
+ 46.0 130.0   
+ 46.2 131.0   
+ 46.4 132.0   
+ 46.6 133.0   
+ 46.8 134.0   
+ 47.0 135.0   
+ 47.2 136.0   
+ 47.4 137.0   
+ 47.6 138.0   
+ 47.8 139.0   
+ 48.0 140.0   
+ 48.2 141.0   
+ 48.4 142.0   
+ 48.6 143.0   
+ 48.8 144.0   
+ 49.0 145.0   
+ 49.2 146.0   
+ 49.4 147.0   
+ 49.6 148.0   
+ 49.8 149.0   
+ 50.0 150.0   
+ 50.2 151.0   
+ 50.4 152.0   
+ 50.6 153.0   
+ 50.8 154.0   
+ 51.0 155.0   
+ 51.2 156.0   
+ 51.4 157.0   
+ 51.6 158.0   
+ 51.8 159.0   
+ 52.0 160.0   
+ 52.2 161.0   
+ 52.4 162.0   
+ 52.6 163.0   
+ 52.8 164.0   
+ 53.0 165.0   
+ 53.2 166.0   
+ 53.4 167.0   
+ 53.6 168.0   
+ 53.8 169.0   
+ 54.0 170.0   
+ 54.2 171.0   
+ 54.4 172.0   
+ 54.6 173.0   
+ 54.8 174.0   
+ 55.0 175.0   
+ 55.2 176.0   
+ 55.4 177.0   
+ 55.6 178.0   
+ 55.8 179.0   
+ 56.0 180.0   
+ 56.2 181.0   
+ 56.4 182.0   
+ 56.6 183.0   
+ 56.8 184.0   
+ 57.0 185.0   
+ 57.2 186.0   
+ 57.4 187.0   
+ 57.6 188.0   
+ 57.8 189.0   
+ 58.0 190.0   
+ 58.2 191.0   
+ 58.4 192.0   
+ 58.6 193.0   
+ 58.8 194.0   
+ 59.0 195.0   
+ 59.2 196.0   
+ 59.4 197.0   
+ 59.6 198.0   
+ 59.8 199.0   
+*/
