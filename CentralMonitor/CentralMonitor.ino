@@ -61,8 +61,8 @@ OneWire  ds(PD7); // DIO4
  * 13/04/2017 Tidy up lots of problems hearing Salus commands
  */
 unsigned long minute = 60;	// note the approx 2 seconds delay in code
-unsigned long setbackMax = 60 * 15; 
-volatile unsigned long elapsedSeconds, nextScheduled, setbackTimer;
+unsigned long setbackMax = 595;	// Close to 10 minutes 
+volatile unsigned long elapsedSeconds, nextScheduled, setbackTimer, delaySeconds;
 volatile byte seconds;
 ISR(TIMER1_COMPA_vect){
 	elapsedSeconds++;
@@ -75,7 +75,7 @@ unsigned int loopCount;
 byte ColdFeed[8] = {0x28,0x53,0x4F,0x4E,0x04,0x00,0x00,0x84};
 byte BoilerFeed[8] = {0x28,0x86,0x39,0x4E,0x04,0x00,0x00,0x5A};
 byte CentralHeatingReturn[8] = {0x28,0x7F,0xCA,0x4D,0x4,0x0,0x0,0xDE};
-byte TankCoilReturn[8] = {0x28,0x7F,0xC6,0x4D,0x04,0x00,0x00,0xFF};
+byte HWTankTemp[8] = {0x28,0x7F,0xC6,0x4D,0x04,0x00,0x00,0xFF};
 
 byte addr[8];
 byte salusOff[] = {SALUSID, OFF, SALUSID | OFF, 90};
@@ -108,7 +108,7 @@ unsigned int targetTemp;
 unsigned int ColdFeed;
 unsigned int BoilerFeed;
 unsigned int CentralHeatingReturn;
-unsigned int TankCoilReturn;
+unsigned int HWTankTemp;
 unsigned int boiler_target;
 unsigned int overRun;   // Temperature overrun
 unsigned int underRun;  // Temperature underrun
@@ -227,19 +227,25 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 					break;
 				case 10:
                   		settings.tracking = false;
+                		needSetback = true;
                   		Serial.println("Tracking off");
                   		break;
 				case 11:
                   		settings.tracking = true;
-						setbackTimer = elapsedSeconds;
-						
+                		needSetback = false;
                   		Serial.println("Tracking on");
                   		break;
-/*				case 12:
-                  		settings.txSkip = 12;
-                  		Serial.println("TX Skip 12");
+				case 12:
+                		needSetback = true;
+                		delaySeconds = elapsedSeconds + setbackMax;
+                  		Serial.println("10 minutes Setback");
                   		break;
-				case 30:
+				case 13:
+                		needSetback = false;
+                		delaySeconds = elapsedSeconds + setbackMax;
+                  		Serial.println("10 minutes without Setback");
+                  		break;
+/*				case 30:
                   		settings.txSkip = 30;
                   		Serial.println("TX Skip 30");
                   		break;
@@ -470,7 +476,7 @@ void checkSetback () {
                 dataChanged = true;
             }
         }
-        if (backCount > 1200) {
+        if (backCount > setbackMax) {
         	rf12_sleep(RF12_WAKEUP);
             if (setback) {
                 rf12_sendStart(0, &setBack1, 5);                          // Issue a OTO to refresh setback.
@@ -760,30 +766,23 @@ void loop () {
          Serial.print(" trend:");
 //         Serial.println(returnTrend);
         
-        payload.TankCoilReturn = getTemp(TankCoilReturn);
-         Serial.print("Coil Return:");
-         Serial.println(payload.TankCoilReturn);
+		payload.HWTankTemp = getTemp(HWTankTemp);
+ 		Serial.print("HW Tank Temp:");
+		Serial.println(payload.HWTankTemp);
 
 		if (settings.tracking) {
-/*		
-			if ((payload.currentTemp + 50) >= payload.targetTemp) {
-				Serial.println("Less than half a degree under target");
-				needSetback = true; }
-			else {
-				needSetback = false;
+			if (delaySeconds <= elapsedSeconds) {
+				if ((payload.BoilerFeed >= settings.maxBoiler) && 
+			   	((payload.currentTemp + 50) >= payload.targetTemp)) {	   
+					Serial.println("Above threshold && almost at target temperature");
+					needSetback = true;
+				}				
+				else if ((payload.BoilerFeed < settings.maxBoiler) ||
+						((payload.currentTemp + 50) < payload.targetTemp)) {			   
+				 		Serial.println("Below threshold || more than 0.5 degrees down");
+						needSetback = false;
+				}
 			}
-*/			
-			if ((payload.BoilerFeed >= settings.maxBoiler) && 
-			   ((payload.currentTemp + 50) >= payload.targetTemp)) {	   
-				Serial.println("Above threshold && almost at target temperature");
-				needSetback = true;
-			}				
-			else if ((payload.BoilerFeed < settings.maxBoiler) ||
-					((payload.currentTemp + 50) < payload.targetTemp)) {			   
-				 	Serial.println("Below threshold || more than 0.5 degrees down");
-					needSetback = false;
-			}
-
 		} else {
 		
 			needSetback = true;
