@@ -61,6 +61,7 @@ OneWire  ds(PD7); // DIO4
  * 13/04/2017 Tidy up lots of problems hearing Salus commands
  */
 unsigned long minute = 60;	// note the approx 2 seconds delay in code
+unsigned long burnTime = 60 * 20;
 unsigned long setbackMax = 595;	// Close to 10 minutes 
 volatile unsigned long elapsedSeconds, nextScheduled, setbackTimer, delaySeconds;
 volatile byte seconds;
@@ -124,7 +125,7 @@ typedef struct {
     byte tracking:1;
     byte spare:6;
     unsigned int maxBoiler;
-    unsigned int maxReturn;
+    unsigned int burnTime;
     byte delayLoop;
     byte salusTX;	// Transmit power when sending OTO commands
     unsigned int addrOTO;
@@ -136,7 +137,7 @@ static eeprom settings;
 
 // Ten off wired DS18B20
 // Blk=GND, Blue=DQ Red=Vdd
-// 28 7F C6 4D 4 00 00 FF Tank Coil
+// 28 7F C6 4D 4 00 00 FF Hot Water Tank
 // 28 7F CA 4D 4 00 00 DE Central Heating Return
 // 28 53 4F 4E 4 00 00 84 Cold Feed
 // 28 E8 AC 4E 4 00 00 EF
@@ -225,6 +226,16 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 					Serial.println();
 		            Serial.println(payloadSize);  
 					break;
+				case 1:
+                  		burnTime = burnTime - minute;
+                  		Serial.print("BurnTime-:");
+                  		Serial.println(burnTime);
+                  		break;
+				case 2:
+                  		burnTime = burnTime + minute;
+                  		Serial.print("BurnTime+:");
+                  		Serial.println(burnTime);
+                  		break;
 				case 10:
                   		settings.tracking = false;
                 		needSetback = true;
@@ -233,6 +244,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 				case 11:
                   		settings.tracking = true;
                 		needSetback = false;
+						delaySeconds = elapsedSeconds;
                   		Serial.println("Tracking on");
                   		break;
 				case 12:
@@ -334,6 +346,7 @@ static byte waitForAck(byte t) {
 } // waitForAck
 
 static void saveSettings () {
+	settings.burnTime = (uint16_t)burnTime;
     settings.start = ~0;
     settings.crc = calcCrc(&settings, sizeof settings - 2);
     // this uses 170 bytes less flash than eeprom_write_block(), no idea why
@@ -360,15 +373,16 @@ static void loadSettings () {
         Serial.println(crc, HEX);
         settings.WatchSALUS = true;
         settings.maxBoiler = 4500;
-        settings.maxReturn = 6500;
+        settings.burnTime = (uint16_t)burnTime;
     	settings.delayLoop = 58;
     } else {
          Serial.println("is good");
     }
     Serial.print("Boiler threshold:");
     Serial.println(settings.maxBoiler);
-    Serial.print("C/H return threshold:");
-    Serial.println(settings.maxReturn);
+    Serial.print("Burn Time:");
+    Serial.println(settings.burnTime);
+//    burnTime = uint32_t(settings.burnTime);
 } // loadSettings
 
 static void printOneChar (char c) {
@@ -441,6 +455,7 @@ void checkSetback () {
                 rf12_sendStart(0, &setBack0, 5);                          // Issue a OTO to cancel setback.
                 rf12_sendWait(1);                                         // Wait for transmission complete.
         		rf12_sleep(RF12_SLEEP);
+				delaySeconds = delaySeconds + minute; 					// Debounce
                 backCount = 0;                                            // OTO every 20 mins
                 payload.setBack = 0;
                 setback = false;
@@ -455,6 +470,7 @@ void checkSetback () {
                 rf12_sendStart(0, &setBack1, 5);                          // Issue a OTO to setback.
                 rf12_sendWait(1);                                         // Wait for transmission complete.
         		rf12_sleep(RF12_SLEEP);
+				delaySeconds = delaySeconds + minute; 					// Debounce
                 backCount = 0;                                            // OTO every 20 mins
                 payload.setBack = 1;
                 setback = true;
@@ -470,6 +486,7 @@ void checkSetback () {
                 rf12_sendWait(1);                                         // Wait for transmission complete.
         		rf12_sleep(RF12_SLEEP);
                 backCount = 0;                                            // OTO every 20 mins
+				delaySeconds = delaySeconds + minute; 					// Debounce
                 payload.setBack = 0;
                 setback = false;
                 needSetback = false;
@@ -697,11 +714,12 @@ static void waitRF12() {
                 		Serial.println();  Serial.flush();
 	        		} // rf12_buf
 	    		} // rf12_recvDone
-    		} // settings.WatchSALU
+    		} // settings.WatchSALUS
     	} // while
     } // waitRF12
 
 byte salusMode = false;
+bool longBurn = true;
 
 void loop () {
 	Serial.print("Elapsed ");
@@ -771,22 +789,37 @@ void loop () {
 		Serial.println(payload.HWTankTemp);
 
 		if (settings.tracking) {
+		
+			if (payload.currentTemp >= payload.targetTemp) {
+				longBurn = false;	
+			}
+			
 			if (delaySeconds <= elapsedSeconds) {
+			
 				if ((payload.BoilerFeed >= settings.maxBoiler) && 
-			   	((payload.currentTemp + 50) >= payload.targetTemp)) {	   
+			   	   ((payload.currentTemp + 50) >= payload.targetTemp)) {	   
 					Serial.println("Above threshold && almost at target temperature");
+					delaySeconds = elapsedSeconds;
 					needSetback = true;
-				}				
-				else if ((payload.BoilerFeed < settings.maxBoiler) ||
-						((payload.currentTemp + 50) < payload.targetTemp)) {			   
-				 		Serial.println("Below threshold || more than 0.5 degrees down");
-						needSetback = false;
+					
+				} else
+				if ((payload.BoilerFeed < settings.maxBoiler) ||
+					((payload.currentTemp + 50) < payload.targetTemp)) {			   
+				 	Serial.println("Below threshold || more than 0.5 degrees down");
+					needSetback = false;
+				 	if (!(longBurn)) {
+				 		Serial.println("Long burn scheduled");
+						delaySeconds = elapsedSeconds + burnTime;	// Stay on for 10mins
+						longBurn = true;
+					}
 				}
 			}
+			
 		} else {
 		
 			needSetback = true;
 			Serial.println("Tracking disabled");
+
 		}	// settings.tracking		
 
 		Serial.flush();
