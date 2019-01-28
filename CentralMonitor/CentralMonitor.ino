@@ -120,7 +120,7 @@ byte messages[64 - BASIC_PAYLOAD_SIZE];
 //
 /////////////////////////////////////////////////////////////////////////////////////
 typedef struct {
-    byte start;
+    byte start;	// 0x55
     byte WatchSALUS:1;
     byte tracking:1;
     byte spare:6;
@@ -346,8 +346,9 @@ static byte waitForAck(byte t) {
 } // waitForAck
 
 static void saveSettings () {
+    settings.start = 0x55;
+    settings.spare = 0;
 	settings.burnTime = (uint16_t)burnTime;
-    settings.start = ~0;
     settings.crc = calcCrc(&settings, sizeof settings - 2);
     // this uses 170 bytes less flash than eeprom_write_block(), no idea why
     byte* p = &settings.start;
@@ -382,7 +383,7 @@ static void loadSettings () {
     Serial.println(settings.maxBoiler);
     Serial.print("Burn Time:");
     Serial.println(settings.burnTime);
-//    burnTime = uint32_t(settings.burnTime);
+    burnTime = uint32_t(settings.burnTime);
 } // loadSettings
 
 static void printOneChar (char c) {
@@ -803,15 +804,20 @@ void loop () {
 					needSetback = true;
 					
 				} else
-				if ((payload.BoilerFeed < settings.maxBoiler) ||
-					((payload.currentTemp + 50) < payload.targetTemp)) {			   
-				 	Serial.println("Below threshold || more than 0.5 degrees down");
+				if (payload.BoilerFeed < settings.maxBoiler) {
+				 	Serial.println("Boiler below threshold");
+					needSetback = false;
+					delaySeconds = elapsedSeconds;
+				}
+				
+				if ((payload.currentTemp + 50) <= payload.targetTemp) {			   
+				 	Serial.println("0.5 degrees down");
 					needSetback = false;
 				 	if (!(longBurn)) {
 				 		Serial.println("Long burn scheduled");
 						delaySeconds = elapsedSeconds + burnTime;	// Stay on for 10mins
 						longBurn = true;
-					}
+					} else delaySeconds = elapsedSeconds;
 				}
 			}
 			
