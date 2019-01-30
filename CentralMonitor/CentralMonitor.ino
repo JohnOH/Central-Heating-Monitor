@@ -389,7 +389,7 @@ static void loadSettings () {
     Serial.println(settings.maxBoiler);
     Serial.print("Burn Time:");
     Serial.println(settings.burnTime);
-//    burnTime = (uint32_t)settings.burnTime;
+    burnTime = (uint32_t)settings.burnTime;
 } // loadSettings
 
 static void printOneChar (char c) {
