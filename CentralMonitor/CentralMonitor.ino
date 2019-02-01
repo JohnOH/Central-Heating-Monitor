@@ -24,9 +24,12 @@
 #define REG_BITFDEVLSB 0x06
 
 #define SETTINGS_EEPROM_ADDR ((uint8_t*) 0x00)
+#define DEBUG ON
 
 #if DEBUG
 #define D(x) x
+#define rf12_sendWait //
+#define rf12_sendStart //
 #else
 #define D(x)
 #endif
@@ -63,11 +66,11 @@ OneWire  ds(PD7); // DIO4
 
 unsigned long minute = 60;	// note the approx 2 seconds delay in code
 unsigned long burnTime = 60 * 20;
-unsigned long setbackMax = 595;	// Close to 10 minutes 
+unsigned long setbackMax = 595;	// Close to 10 minutes
 volatile unsigned long elapsedSeconds, nextScheduled, setbackTimer, delaySeconds;
 volatile byte seconds;
 unsigned int loopCount;
-unsigned int halfish = 49;
+
 byte ColdFeed[8] = {0x28,0x53,0x4F,0x4E,0x04,0x00,0x00,0x84};
 byte BoilerFeed[8] = {0x28,0x86,0x39,0x4E,0x04,0x00,0x00,0x5A};
 byte CentralHeatingReturn[8] = {0x28,0x7F,0xCA,0x4D,0x4,0x0,0x0,0xDE};
@@ -158,14 +161,16 @@ byte getOTO = false;
 byte dataChanged = true;
 //signed int boilerTrend;
 //signed int returnTrend;
+signed int tempTrend = (-50);	// Should never be zero
+unsigned int previousCurrentTemp;
 
+// Interrupt Routines
 ISR(TIMER1_COMPA_vect){
 	elapsedSeconds++;
 	seconds++;
 }
-
 ISR(WDT_vect) { Sleepy::watchdogEvent(); }
-
+//
 static byte sendACK() {
 payload.boiler_target = settings.maxBoiler;
 payload.tracking = settings.tracking;
@@ -174,6 +179,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
     delay(t * t);                   // Increasing the gap between retransmissions
     payload.attempts = t;
     rf12_sleep(RF12_WAKEUP);
+      
     if (rf12_recvDone()) {
          Serial.print("Discarded: ");             // Flush the buffer
         for (byte i = 0; i < 8; i++) {
@@ -182,27 +188,28 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
             printOneChar(' ');
         }
          Serial.println();
-         Serial.flush(); 
+//         Serial.flush(); 
     }
       
     while (!(rf12_canSend())) {
-         Serial.print("Airwaves Busy");
+		Serial.print("Airwaves Busy\r");
 		delay(50);
     }
-        
-	Serial.println("TX Start");
+
+//	Serial.println("TX Start");
 	rf12_sendStart(RF12_HDR_ACK, &payload, payloadSize);
-	Serial.println("TX Done");
-    Serial.flush();      
+	rf12_sendWait(1);
+//	Serial.println("TX Done");
+//    Serial.flush();      
     byte acked = waitForAck(t * t); // Wait for increasingly longer time for the ACK
     if (acked) {
         payloadSize = BASIC_PAYLOAD_SIZE;   // Packet was ACK'ed by someone
 		if (payload.packetType == 2) payload.packetType = 3;	// Repeated data flag
         for (byte i = 0; i < 6; i++) {
             showByte(rf12_buf[i]);
-            printOneChar(' ');
+//            printOneChar(' ');
         }
-		Serial.println();
+//		Serial.println();
         if (rf12_buf[2] > 0) {                          // Non-zero length ACK packet?
             payload.command = rf12_buf[3];
         	dataChanged = true;
@@ -253,11 +260,13 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                   		Serial.println("Tracking on");
                   		break;
 				case 12:
+                  		settings.tracking = true;
                 		needSetback = true;
                 		delaySeconds = elapsedSeconds + setbackMax;
                   		Serial.println("10 minutes Setback");
                   		break;
 				case 13:
+                  		settings.tracking = true;
                 		needSetback = false;
                 		delaySeconds = elapsedSeconds + setbackMax;
                   		Serial.println("10 minutes without Setback");
@@ -316,25 +325,27 @@ static byte waitForAck(byte t) {
     MilliTimer ackTimer;
     while (!ackTimer.poll(ACK_TIME + t)) {
         if (rf12_recvDone()) {
-            rf12_sleep(RF12_SLEEP);
-
+//            rf12_sleep(RF12_SLEEP);
+/*
              Serial.print((ACK_TIME + t) - ackTimer.remaining());
              Serial.print("ms RX ");
-            
+*/            
             if (rf12_crc == 0) {                          // Valid packet?
                 // see http://talk.jeelabs.net/topic/811#post-4712
                 if (rf12_hdr == (RF12_HDR_DST | RF12_HDR_CTL | NodeID)) {
                      Serial.print("ACK ");
                     return 1;            
-                } else {
-                     Serial.print("Unmatched: ");             // Flush the buffer
+                } /* else {
+                	Serial.print(rf12_hdr, HEX); Serial.print(" ");
+                	 Serial.print((RF12_HDR_DST | RF12_HDR_CTL | NodeID), HEX);
+                     Serial.print(" Unmatched: ");             // Flush the buffer
                     for (byte i = 0; i < 8; i++) {;
                         showByte(rf12_buf[i]);
                         rf12_buf[i] = 0xFF;              // Paint it over
                         printOneChar(' ');
                     }
                     showStats();                                
-                }
+                } */
             } else {
                  Serial.print("Bad CRC");
                 payload.badCRC++;
@@ -344,10 +355,11 @@ static byte waitForAck(byte t) {
         set_sleep_mode(SLEEP_MODE_IDLE);   // Wait a while for the reply?
         sleep_mode();
     }
-//    printOneChar(' ');
+/*
      Serial.print(ACK_TIME + t);
      Serial.println("ms ACK Timeout");
      Serial.flush();
+*/
     return 0;
 } // waitForAck
 
@@ -456,11 +468,13 @@ void checkSetback () {
         if (!(needSetback)) {
             if (setback) {
 		        rf12_sleep(RF12_WAKEUP);                                  // All set, wake up radio
+#if !DEBUG            
+                rf12_sendStart(0, &setBack0, 5);                          // Issue a OTO to cancel setback.
+				rf12_sendWait(1);											// Wait for transmission complete.
                 rf12_sendStart(0, &setBack0, 5);                          // Issue a OTO to cancel setback.
                 rf12_sendWait(1);                                         // Wait for transmission complete.
+#endif
                 Serial.println("Setback Cancelled");
-                rf12_sendStart(0, &setBack0, 5);                          // Issue a OTO to cancel setback.
-                rf12_sendWait(1);                                         // Wait for transmission complete.
         		rf12_sleep(RF12_SLEEP);
                 backCount = 0;                                            // OTO every 10 mins
                 payload.setBack = 0;
@@ -470,11 +484,13 @@ void checkSetback () {
         } else {
             if (!(setback)) {
         		rf12_sleep(RF12_WAKEUP);
+#if !DEBUG            
                 rf12_sendStart(0, &setBack1, 5);                          // Issue a OTO to setback.
                 rf12_sendWait(1);                                         // Wait for transmission complete.
+                rf12_sendStart(0, &setBack1, 5);                          // Issue a OTO to setback.
+                rf12_sendWait(1);                                         // Wait for transmission complete.
+#endif
                 Serial.println("Setback Issued");
-                rf12_sendStart(0, &setBack1, 5);                          // Issue a OTO to setback.
-                rf12_sendWait(1);                                         // Wait for transmission complete.
         		rf12_sleep(RF12_SLEEP);
                 backCount = 0;                                            // OTO every 10 mins
                 payload.setBack = 1;
@@ -485,11 +501,13 @@ void checkSetback () {
             else
             if ((settings.tracking) && (elapsedSeconds >= setbackTimer)) {
 		        rf12_sleep(RF12_WAKEUP);                                  // All set, wake up radio
+#if !DEBUG
                 rf12_sendStart(0, &setBack0, 5);                          // Issue a OTO to cancel setback.
                 rf12_sendWait(1);                                         // Wait for transmission complete.
+                rf12_sendStart(0, &setBack0, 5);                          // Issue a OTO to cancel setback.
+                rf12_sendWait(1);                                         // Wait for transmission complete.
+#endif
                 Serial.println("Setback Cancelled");
-                rf12_sendStart(0, &setBack0, 5);                          // Issue a OTO to cancel setback.
-                rf12_sendWait(1);                                         // Wait for transmission complete.
         		rf12_sleep(RF12_SLEEP);
                 backCount = 0;                                            // OTO every 10 mins
                 payload.setBack = 0;
@@ -503,13 +521,19 @@ void checkSetback () {
         if (backCount > setbackMax) {
         	rf12_sleep(RF12_WAKEUP);
             if (setback) {
+#if !DEBUG
                 rf12_sendStart(0, &setBack1, 5);                          // Issue a OTO to refresh setback.
+#endif
                 payload.setBack = 1;
             } else {
+#if !DEBUG
                 rf12_sendStart(0, &setBack0, 5);                          // Issue a OTO to refresh null setback.
+#endif
                 payload.setBack = 0;
             }
+#if !DEBUG
             rf12_sendWait(1);                                             // Wait for transmission complete.
+#endif
         	rf12_sleep(RF12_SLEEP);
             Serial.println("\nSetback Refreshed\n");
             backCount = 0;
@@ -615,15 +639,15 @@ unsigned int getTemp(byte* sensor) {
 	ds.reset();
 	ds.select(sensor);    
 	ds.write(0xBE);                                            // Request Scratchpad
-
+/*
 	Serial.print("Data = ");
 	Serial.print(present,HEX);
 	Serial.print(" ");
-
+*/
 	for ( i = 0; i < 9; i++) {           // we need 9 bytes
 		data[i] = ds.read();
-		Serial.print(data[i], HEX);
-		Serial.print(" ");
+//		Serial.print(data[i], HEX);
+//		Serial.print(" ");
 	}
 /*
    Serial.print(" CRC=");
@@ -669,6 +693,9 @@ static void waitRF12() {
 
             		switch (rf12_buf[1]) {
                 		case 165: // Thermostat
+                			if (previousCurrentTemp) previousCurrentTemp = payload.currentTemp;
+                			else previousCurrentTemp = ((rf12_buf[6] << 8) | rf12_buf[5]);
+                			
                     		payload.currentTemp = ((rf12_buf[6] << 8) | rf12_buf[5]);
                     		Serial.print(" Current=");  Serial.print(payload.currentTemp);
                     		payload.lowestTemp = ((rf12_buf[8] << 8) | rf12_buf[7]);
@@ -699,8 +726,10 @@ static void waitRF12() {
                         		//
                         		Serial.print(commandOTO[3]); printOneChar(':');  Serial.print(commandOTO[4]);  Serial.flush();
                         		rf12_sleep(RF12_WAKEUP);
+#if !DEBUG
                         		rf12_sendStart(0, &commandOTO, 5);               // Forward the OTO command.
                         		rf12_sendWait(1);                                // Wait for transmission complete.
+#endif
                         		rf12_sleep(RF12_SLEEP);                                
                     		} else  {
                     			Serial.println(" One Touch Override Unknown");  
@@ -729,13 +758,14 @@ byte salusMode = false;
 bool longBurn = false;
 
 void loop () {
+/*
 	Serial.print("Elapsed ");
 	Serial.print(millis());
 	Serial.print(" Next TX ");
 	Serial.print(nextScheduled);
 	Serial.print("-");
 	Serial.println(elapsedSeconds);
-	
+*/	
 /*
  * Setup to receive Salus transmissions
  */
@@ -766,47 +796,91 @@ void loop () {
 
 	rf12_sleep(RF12_WAKEUP);
 	waitRF12();	// Loop whilst checking radio
-	Serial.println("Sleep radio"); Serial.flush();
+//	Serial.println("Sleep radio"); Serial.flush();
 	rf12_sleep(RF12_SLEEP);
 	
 	payload.ColdFeed = getTemp(ColdFeed);
+/*	
 	 Serial.print("Cold Feed:");
-	 Serial.println(payload.ColdFeed);
-
+	 Serial.print(payload.ColdFeed);
+*/
 	payload.BoilerFeed = getTemp(BoilerFeed);
 //	boilerTrend = 0;
 //	if (previousBoilerFeed) boilerTrend = payload.BoilerFeed - previousBoilerFeed;
 //		previousBoilerFeed = payload.BoilerFeed;
-         Serial.print("Boiler Feed:");
+/*
+         Serial.print(" Boiler Feed:");
          Serial.print(payload.BoilerFeed);
-         Serial.print(" trend:");
+*/
+//         Serial.print(" Boiler trend:");
 //         Serial.println(boilerTrend);
                         
         payload.CentralHeatingReturn = (getTemp(CentralHeatingReturn));
 //        returnTrend = 0;
 //        if (previousReturn) returnTrend = payload.CentralHeatingReturn - previousReturn;
 //        previousReturn = payload.CentralHeatingReturn;
-         Serial.print("Heating Return:");
+/*
+         Serial.print(" Heating Return:");
          Serial.print(payload.CentralHeatingReturn);
-         Serial.print(" trend:");
+*/
+ //        Serial.print(" Return trend:");
 //         Serial.println(returnTrend);
         
 		payload.HWTankTemp = getTemp(HWTankTemp);
- 		Serial.print("HW Tank Temp:");
+/*		
+ 		Serial.print(" HW Tank Temp:");
 		Serial.println(payload.HWTankTemp);
-
+*/
 		if (settings.tracking) {
 		
 			if (payload.currentTemp >= payload.targetTemp) {
 				delaySeconds = elapsedSeconds;
+/*				
+				Serial.print(payload.currentTemp);			   
+			 	Serial.println(" OK");
+*/
 				needSetback = true;
 				longBurn = true;	
+			} else
+			if (delaySeconds <= elapsedSeconds) {			
+				Serial.print(payload.currentTemp);			   
+			 	Serial.println(" down");
+				needSetback = false;
+			 	if (longBurn) {
+			 		Serial.println("Long burn scheduled");
+					delaySeconds = elapsedSeconds + burnTime;	// Heating on a while
+					longBurn = false;
+				}
 			}
 			
 			if (delaySeconds <= elapsedSeconds) {
 			
+				if (signed int c = payload.currentTemp - previousCurrentTemp) {					
+					tempTrend = c;	// Positive if temperature is increasing
+					Serial.print("Temp Trend="); Serial.println(tempTrend);
+				}
+
+				if ((payload.currentTemp + 50) > payload.targetTemp) {	   
+					if (payload.BoilerFeed >= settings.maxBoiler) {	   
+						Serial.println("Boiler above threshold");
+						if (tempTrend > 0) needSetback = true;					
+					} else {
+				 		Serial.println("Boiler below threshold");
+						if (tempTrend < 0) needSetback = false;
+					}
+				}
+				
+			}
+/*			
+			if (delaySeconds <= elapsedSeconds) {
+			
+				if ((int c = payload.currentTemp - payload.targetTemp)) {
+					tempTrend = c; 
+					Serial.print("Temp Trend="); Serial.println(tempTrend);
+				}
+			
 				if ((payload.BoilerFeed >= settings.maxBoiler) && 
-			   	   ((payload.currentTemp + halfish) > payload.targetTemp)) {	   
+			   	   ((payload.currentTemp + 50) > payload.targetTemp)) {	   
 					Serial.println("Above threshold && almost at target temperature");
 					needSetback = true;
 					
@@ -816,7 +890,7 @@ void loop () {
 					needSetback = false;
 				}
 
-				if ((payload.currentTemp + halfish) < payload.targetTemp) {
+				if ((payload.currentTemp) < payload.targetTemp) {
 					Serial.print(payload.currentTemp);			   
 				 	Serial.println(" degree(s) down");
 					needSetback = false;
@@ -827,6 +901,8 @@ void loop () {
 					}
 				}
 			}
+			
+*/			
 			payload.status = (int16_t)delaySeconds;
 			payload.elapsed = (uint16_t)elapsedSeconds;
 		
@@ -855,15 +931,17 @@ void loop () {
 
 		checkSetback();	// Needs to run regularly
 		
-        Serial.println(backCount);
-        Serial.println(payload.setBack);
+//        Serial.println(backCount);
+//        Serial.println(payload.setBack);
 		
         if ((elapsedSeconds >= nextScheduled) || (dataChanged)) {	// approx 60 seconds
         	dataChanged = false;
             payload.count++;
             if (NodeID = rf12_configSilent()) {
-				rf12_control(0xC040);			// set low battery level to 2.2V
+   				 rf12_control(0x9850); // !mp,90kHz,MAX OUT
+   				 rf12_control(0xC040);			// set low battery level to 2.2V
             	salusMode = false;
+      			     	
                 Serial.print("Node ");
                 Serial.print(NodeID);
                 Serial.print(" sending packet #");
@@ -872,7 +950,7 @@ void loop () {
                 Serial.print(payloadSize);
                 Serial.print(" sizeof ");
                 Serial.println(sizeof (struct payload));
-                Serial.flush();
+//                Serial.flush();
             
                 byte tries = sendACK();
         		nextScheduled = elapsedSeconds + minute;
@@ -884,8 +962,9 @@ void loop () {
                      Serial.print("Packet #");
                      Serial.print(payload.count);
                      Serial.println(" Aborted");
-                }
-                Serial.flush();             
+                }              
+                Serial.flush();  
+           
         } else {
             while( true ){
                 rf12_sleep(RF12_SLEEP);
@@ -895,19 +974,23 @@ void loop () {
         }
     } 
                 
-	Serial.print("Voltage:");
+//	Serial.print("Voltage:");
     payload.voltage = readVcc();
-    Serial.println(payload.voltage);
+//    Serial.println(payload.voltage);
 	if (payload.voltage > 28) {
+/* 
     	 Serial.print("Looping ");
          Serial.println(++loopCount);
     	 Serial.flush();
+*/
     } else {
         rf12_sleep(RF12_SLEEP);
         Serial.println("Replace batteries");
     	Serial.flush();
     	cli();
     }
+    Serial.print("Temp Trend="); Serial.print(tempTrend);
+    Serial.print(" delaySeconds="); Serial.println(delaySeconds);
 } // Loop
 /*
  Deg  Code
