@@ -861,10 +861,10 @@ void loop () {
 				if ((payload.currentTemp + 50) >= payload.targetTemp) {	// Approaching temp match?	   
 					if (payload.BoilerFeed >= settings.maxBoiler) {	   
 						//Serial.println("Boiler above threshold");
-						if (tempTrend > 0) needSetback = true;					
+						needSetback = true;					
 					} else {
 				 		//Serial.println("Boiler below threshold");
-						if (tempTrend < 0) needSetback = false;
+						needSetback = false;
 					}
 				}
 				
