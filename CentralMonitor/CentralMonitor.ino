@@ -832,7 +832,7 @@ void loop () {
 */
 		if (settings.tracking) {
 		
-			if (payload.currentTemp >= payload.targetTemp) {
+			if (payload.currentTemp >= payload.targetTemp) {	// Backstop
 				delaySeconds = elapsedSeconds;
 /*				
 				//Serial.print(payload.currentTemp);			   
@@ -850,15 +850,15 @@ void loop () {
 					delaySeconds = elapsedSeconds + burnTime;	// Heating on a while
 					longBurn = false;
 				}
-			}
+//			}
 			
-			if (delaySeconds <= elapsedSeconds) {
+//			if (delaySeconds <= elapsedSeconds) {
 			
-				if (signed int c = payload.currentTemp - previousCurrentTemp) {					
-					tempTrend = c;	// Positive if temperature is increasing
-				}
+//				if (signed int c = payload.currentTemp - previousCurrentTemp) {					
+//					tempTrend = c;	// Positive if temperature is increasing
+//				}
 
-				if ((payload.currentTemp + 50) > payload.targetTemp) {	// Approaching temp match?	   
+				if ((payload.currentTemp + 50) >= payload.targetTemp) {	// Approaching temp match?	   
 					if (payload.BoilerFeed >= settings.maxBoiler) {	   
 						//Serial.println("Boiler above threshold");
 						if (tempTrend > 0) needSetback = true;					
