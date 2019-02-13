@@ -220,7 +220,8 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
         	payload.ackKey = rf12_buf[3];	// Acknowledge packet using return payload
 			Serial.print("Ack Key=");
 			Serial.println(rf12_buf[3]);
-        }
+        } else payload.ackKey = 85;
+        
         if (rf12_len > 1) {
 			nextScheduled = elapsedSeconds;
 			dataChanged = true;
@@ -286,6 +287,16 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                   		break;
                   		
 				case 20:
+                  		settings.WatchSALUS = false;
+                  		Serial.println("WatchSALUS off");
+                  		break;
+                  		
+				case 21:
+                  		settings.WatchSALUS = true;
+                  		Serial.println("WatchSALUS on");
+                  		break;
+                  		
+				case 22:
 						if (rf12_len == 2) {
                         	Serial.print(settings.salusTX);
 							settings.salusTX = rf12_buf[4];
@@ -319,7 +330,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 /*				case 170:	// Reserved													*/
 
 				case 151:	// Adjust burn time.
-						if ( (rf12_len > 3) && (post < 3600) ) {
+						if (rf12_len > 3) {
                   			Serial.print(settings.burnTime1);
 							settings.burnTime1 = post;
                   			Serial.print(" burnTime1:");
@@ -328,30 +339,50 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 						break;
 						
 				case 152:	// Adjust burn time.
-						if ( (rf12_len > 3) && (post < 3600) ) {
+						if (rf12_len > 3) {
                   			Serial.print(settings.burnTime2);
 							settings.burnTime2 = post;
-                  			Serial.print(" burnTime1:");
-                  			Serial.println(settings.burnTime1);
+                  			Serial.print(" burnTime2:");
+                  			Serial.println(settings.burnTime2);
                   		}
 						break;
 						
 				case 153:	// Adjust burn time.
-						if ( (rf12_len > 3) && (post < 3600) ) {
+						if (rf12_len > 3) {
                   			Serial.print(settings.burnTime3);
 							settings.burnTime3 = post;
-                  			Serial.print(" burnTime1:");
-                  			Serial.println(settings.burnTime1);
+                  			Serial.print(" burnTime3:");
+                  			Serial.println(settings.burnTime3);
+                  		}
+						break;
+						
+				case 160:	// Fake Boiler temperature
+						if (rf12_len > 3) {
+                  			Serial.print(payload.BoilerFeed);
+							payload.BoilerFeed = post;
+                  			Serial.print(" BoilerFeed:");
+                  			Serial.println(payload.BoilerFeed);
                   		}
 						break;
 						
 				case 200:	// Fake the current temperature
-						if ( (rf12_len > 3) && (post < 2500) ) {
+						if ( (rf12_len > 3) && (post < 5000) ) {
                       		Serial.print(payload.currentTemp);
+							previousCurrentTemp = payload.currentTemp;
 							payload.currentTemp = post;
                       		payload.packetType = 1;	// Faked current Temp
                       		Serial.print(" Faked current temperature ");
                       		Serial.println(payload.currentTemp);
+                        }
+						break;						
+						      
+				case 201:	// Fake the target temperature
+						if ( (rf12_len > 3) && (post < 5000) ) {
+                      		Serial.print(payload.targetTemp);
+							payload.targetTemp = post;
+                      		payload.packetType = 1;	// Faked target Temp
+                      		Serial.print(" Faked target temperature ");
+                      		Serial.println(payload.targetTemp);
                         }
 						break;						
 						      
@@ -363,6 +394,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                   		break;
                   		
 				default:
+						payload.ackKey = 170;	// Indicate an issue
 						Serial.print(rf12_buf[4]);
 						Serial.println(" Unknown Command");
                       	break;
@@ -444,7 +476,7 @@ static void loadSettings () {
         Serial.println("is bad, defaulting");
         Serial.println(crc, HEX);
         settings.WatchSALUS = true;
-        settings.maxBoiler = 4500;
+        settings.maxBoiler = 5000;
         settings.burnTime3 = 60 * 3;
         settings.burnTime2 = 60 * 15;
         settings.burnTime1 = 60 * 19;
@@ -702,7 +734,8 @@ unsigned int getTemp(byte* sensor) {
 byte payloadReady = false;
 
 static void waitRF12() {
-//    while (1) {
+	uint32_t t = elapsedSeconds + uint32_t(1);
+    while (t > seconds) {
 		wdt_reset();		// Hold off Watchdog
     	if( settings.WatchSALUS ) {	
     		if( rf12_recvDone() )	{
@@ -728,9 +761,9 @@ static void waitRF12() {
 
             		switch (rf12_buf[1]) {
                 		case 165: // Thermostat
-                			if (previousCurrentTemp) previousCurrentTemp = payload.currentTemp;
-                			else previousCurrentTemp = ((rf12_buf[10] << 8) | rf12_buf[9]);
-                			
+                			if ( !(previousCurrentTemp) ) previousCurrentTemp = ((rf12_buf[10] << 8) | rf12_buf[9]);
+							else previousCurrentTemp = payload.currentTemp;
+							// First pass default to target temperature
                     		payload.currentTemp = ((rf12_buf[6] << 8) | rf12_buf[5]);
                     		Serial.print(" Current=");  Serial.print(payload.currentTemp);
                     		payload.lowestTemp = ((rf12_buf[8] << 8) | rf12_buf[7]);
@@ -786,8 +819,7 @@ static void waitRF12() {
 	        		} // rf12_buf
 	    		} // rf12_recvDone
     		} // settings.WatchSALUS
-    		delay(1000);
-//    	} // while
+    	} // while
     } // waitRF12
 
 byte salusMode = false;
@@ -869,11 +901,13 @@ void loop () {
 */
 		if (settings.tracking) {
 		
-			Serial.print(payload.currentTemp); Serial.println(" Start");
+			Serial.print(payload.currentTemp); Serial.println(" currentTemp");
+			Serial.print(payload.targetTemp); Serial.println(" targetTemp");
+			
 			if (payload.currentTemp >= payload.targetTemp) {	// Backstop
 				needSetback = true;
 				delaySeconds = elapsedSeconds;
-				Serial.print(payload.currentTemp); Serial.println(" OK");
+				Serial.print(payload.currentTemp); Serial.println(" Temperature Fine");
 				
 			} else {
 				bool tempChanged;
@@ -881,12 +915,11 @@ void loop () {
 				if (c) {
 					tempTrend = c;				
 					// Positive if temperature is increasing				
-					Serial.print("Temp Trend="); Serial.println(tempTrend);
+					Serial.print("Temp Trend "); Serial.println(tempTrend);
 					previousCurrentTemp = payload.currentTemp;
 					tempChanged = true;
 				} else {
-					Serial.print("Temp trend unchanged="); Serial.println(tempTrend);
-//					previousCurrentTemp = payload.currentTemp;
+					Serial.print("Temp trend unchanged "); Serial.println(tempTrend);
 					tempChanged = false;
 				}
 
@@ -896,6 +929,8 @@ void loop () {
 					else delaySeconds = elapsedSeconds + (uint32_t)settings.burnTime1;				
 				} 
 				
+				Serial.print("elapsedSeconds "); Serial.println( (signed long int)(elapsedSeconds) );			   
+				Serial.print("delaySeconds "); Serial.println( (signed long int)(delaySeconds) );			   
 				bool waiting;
 				if (delaySeconds >= elapsedSeconds) {
 					waiting = true;			
@@ -903,7 +938,8 @@ void loop () {
 			 		Serial.println(" Waiting");
 				} else {
 					waiting = false;
-					Serial.print( (signed long int)(delaySeconds - elapsedSeconds) );			   
+					delaySeconds = elapsedSeconds;
+//					Serial.print( (signed long int)(delaySeconds - elapsedSeconds) );			   
 			 		Serial.println(" Not Waiting");			
 				}				
 				
@@ -916,8 +952,13 @@ void loop () {
 				 		Serial.println("Boiler below threshold");
 						needSetback = false;
 						delaySeconds = elapsedSeconds + (uint32_t)settings.burnTime3;
+                  		Serial.print(" burnTime3:");
+                  		Serial.println(settings.burnTime3);
 					}
-				} else needSetback = false;
+				} else {
+					needSetback = false;
+					Serial.print(payload.currentTemp); Serial.println(" Temperature under target");
+				}
 			}
 		
 		} else {	// settings.tracking
@@ -1001,6 +1042,7 @@ void loop () {
     	cli();
     }
     Serial.print("Temp Trend="); Serial.print(tempTrend);
+    Serial.print(" elapsedSeconds="); Serial.print(elapsedSeconds);
     Serial.print(" delaySeconds="); Serial.print(delaySeconds);
     Serial.print(" Setback="); Serial.print(setback);
     Serial.print(" needSetback="); Serial.print(needSetback);
