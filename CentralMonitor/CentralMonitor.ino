@@ -223,7 +223,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
         } else payload.ackKey = 85;
         
         if (rf12_len > 1) {
-			nextScheduled = elapsedSeconds;
+//			nextScheduled = elapsedSeconds;
 			dataChanged = true;
         	unsigned int post = (uint16_t)setbackMax;
 			if (rf12_len > 3) {
@@ -247,7 +247,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 			byte i;
 			switch (rf12_buf[4]) {
 				case 1:
-		            	Serial.println(payloadSize);  
+		            	Serial.print("Report eeprom ");  
 						for (i = 0; i < sizeof settings; i++) {
 							payload.messages[((rf12_len + 5) + i)] = p[i];
 							payloadSize++;
@@ -395,6 +395,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                   		
 				default:
 						payload.ackKey = 170;	// Indicate an issue
+						dataChanged = false;
 						Serial.print(rf12_buf[4]);
 						Serial.println(" Unknown Command");
                       	break;
