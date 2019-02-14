@@ -170,7 +170,7 @@ byte dataChanged = true;
 //signed int boilerTrend;
 //signed int returnTrend;
 signed int tempTrend = 50;	// Should never be zero
-int previousCurrentTemp;
+int previousCurrentTemp, previousTargetTemp;
 
 static void showString (PGM_P s); // forward declaration
 
@@ -235,8 +235,8 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
         	payload.ackKey = rf12_buf[3];	// Acknowledge packet using return payload
 			showString(PSTR("Ack Key="));
 			Serial.println(rf12_buf[3]);
-			delay(10);
         } else payload.ackKey = 85;
+//		delay(50);
         
         if (rf12_len > 1) {
 //			nextScheduled = elapsedSeconds;
@@ -262,6 +262,10 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
             payloadSize = BASIC_PAYLOAD_SIZE + (rf12_len + 5);
 			byte* p = &settings.start;
 			byte i;
+            Serial.print(q);
+      		showString(PSTR(" Payload length:"));
+			Serial.println(payloadSize);
+
 			switch (rf12_buf[4]) {
 				case 1:
 		            	showString(PSTR("Report eeprom "));  
@@ -271,7 +275,9 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 							payloadSize++;
 							Serial.print(p[i]); printOneChar(' ');
 						}
-						Serial.println();
+                		Serial.print(q);
+                  		showString(PSTR(" Payload length:"));
+						Serial.println(payloadSize);
 						break;
 
 				case 10:
@@ -780,8 +786,13 @@ static void waitRF12() {
 
             		switch (rf12_buf[1]) {
                 		case 165: // Thermostat
+                		
                 			if ( !(previousCurrentTemp) ) previousCurrentTemp = ((rf12_buf[10] << 8) | rf12_buf[9]);
 							else previousCurrentTemp = payload.currentTemp;
+							
+                			if ( !(previousTargetTemp) ) previousTargetTemp = ((rf12_buf[10] << 8) | rf12_buf[9]);
+							else previousTargetTemp = payload.targetTemp;
+							
 							// First pass default to target temperature
                     		payload.currentTemp = ((rf12_buf[6] << 8) | rf12_buf[5]);
                     		showString(PSTR(" Current="));  Serial.print(payload.currentTemp);
@@ -941,11 +952,30 @@ void loop () {
 					showString(PSTR("Temp trend unchanged ")); Serial.println(tempTrend);
 					tempChanged = false;
 				}
-
+				
+				if (payload.targetTemp > previousTargetTemp) {
+					tempChanged = true;
+			 		showString(PSTR("Target temperature changed\n"));
+			 		tempTrend = (-50);	// We want a burnTime1
+					previousTargetTemp = payload.targetTemp;
+				} else
+				if (payload.targetTemp < previousTargetTemp) {
+					tempChanged = false;
+			 		showString(PSTR("Target temperature changed\n"));
+					previousTargetTemp = payload.targetTemp;
+				}
+								
 				if (tempChanged){
-			 		showString(PSTR("Temperature changed\n"));
-					if (tempTrend > 0) delaySeconds = elapsedSeconds + (uint32_t)settings.burnTime2;
-					else delaySeconds = elapsedSeconds + (uint32_t)settings.burnTime1;				
+			 		showString(PSTR("A temperature changed\n"));
+					if (tempTrend > 0) {
+						delaySeconds = elapsedSeconds + (uint32_t)settings.burnTime2;
+			 			showString(PSTR("burnTime2:"));
+                  		Serial.println(settings.burnTime2);
+					} else {
+						delaySeconds = elapsedSeconds + (uint32_t)settings.burnTime1;
+			 			showString(PSTR("burnTime1:"));
+                  		Serial.println(settings.burnTime1);
+					}				
 				} 
 				
 				showString(PSTR("elapsedSeconds ")); Serial.println( (signed long int)(elapsedSeconds) );			   
@@ -965,10 +995,12 @@ void loop () {
 				if (waiting) needSetback = false;
 				else if ( (payload.currentTemp + 50) >= payload.targetTemp) {
 					if (payload.BoilerFeed >= settings.maxBoiler) {	   
-						showString(PSTR("Boiler above threshold\n"));
+						showString(PSTR("Boiler above threshold:"));
+                  		Serial.println(payload.BoilerFeed);
 						needSetback = true;					
 					} else {
-				 		showString(PSTR("Boiler below threshold\n"));
+				 		showString(PSTR("Boiler below threshold:"));
+                  		Serial.println(payload.BoilerFeed);
 						needSetback = false;
 						delaySeconds = elapsedSeconds + (uint32_t)settings.burnTime3;
                   		showString(PSTR(" burnTime3:"));
@@ -1024,6 +1056,7 @@ void loop () {
 //                Serial.flush();
             
                 byte tries = sendACK();
+                
         		nextScheduled = elapsedSeconds + minute;
             
                 if (tries) { 
