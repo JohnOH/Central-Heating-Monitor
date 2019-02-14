@@ -104,7 +104,7 @@ byte setBack: 1;      // True if a setback is pending
 byte packetType:  2;  // High order packet type bits
 byte attempts: 4;     // transmission attempts
 byte count: 4;        // packet count
-byte voltage;
+byte tick;
 unsigned int salusAddress;
 byte salusCommand;
 byte salusNoise;
@@ -208,8 +208,8 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
             rf12_buf[i] = 0xFF;			// Paint it over
             printOneChar(' ');
         }
-         Serial.println();
-         Serial.flush(); 
+		Serial.println();
+//		Serial.flush(); 
     }
       
     while (!(rf12_canSend())) {
@@ -224,6 +224,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 	Serial.flush();      
     byte acked = waitForAck(t * t); // Wait for increasingly longer time for the ACK
     if (acked) {
+		payload.tick = 0;    
         payloadSize = BASIC_PAYLOAD_SIZE;   // Packet was ACK'ed by someone
 		if (payload.packetType == 2) payload.packetType = 3;	// Repeated data flag
         for (byte i = 0; i < rf12_len; i++) {
@@ -236,10 +237,9 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 			showString(PSTR("Ack Key="));
 			Serial.println(rf12_buf[3]);
         } else payload.ackKey = 85;
-//		delay(50);
+//		delay(1000);	// Allow time for central node to turn around into RX mode
         
         if (rf12_len > 1) {
-//			nextScheduled = elapsedSeconds;
 			dataChanged = true;
         	unsigned int post = (uint16_t)setbackMax;
 			if (rf12_len > 3) {
@@ -256,7 +256,6 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
             for (q = 0; q < (rf12_len + 5); q++) {
                 payload.messages[q] = (byte)rf12_buf[q];	// Return command stream with next packet
                 Serial.print(rf12_buf[q], HEX); printOneChar(' ');
-//                Serial.print((byte)payload.messages[i], HEX); printOneChar(' ');
             }
 			Serial.println();
             payloadSize = BASIC_PAYLOAD_SIZE + (rf12_len + 5);
@@ -268,7 +267,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 
 			switch (rf12_buf[4]) {
 				case 1:
-		            	showString(PSTR("Report eeprom "));  
+		            	showString(PSTR("Report eeprom:"));  
 						for (i = 0; i < sizeof settings; i++) {
 							q++;
 							payload.messages[q] = p[i];
@@ -540,7 +539,7 @@ static void showWord (unsigned int value) {
 //    } else
 //         Serial.print((word) value);    
 }
-
+/*
 unsigned int readVcc() {
   // Read 1.1V reference against AVcc
   // set the reference to Vcc and the measurement to the internal 1.1V reference
@@ -566,7 +565,7 @@ unsigned int readVcc() {
   result = ((1125300L / result)/100);   // Calculate Vcc (in mV); 1125300 = 1.1*1023*1000
   return result; // Vcc in millivolts
 }
-
+*/
 static word calcCrc (const void* ptr, byte len) {
     word crc = ~0;
     for (byte i = 0; i < len; ++i)
@@ -578,16 +577,17 @@ void checkSetback () {
         backCount++;
         if (!(needSetback)) {
             if (setback) {
-		        rf12_sleep(RF12_WAKEUP);                                  // All set, wake up radio
+		        rf12_sleep(RF12_WAKEUP);					// All set, wake up radio
+        		payload.tick = (uint8_t)(seconds - elapsedSeconds);
 #if !DEBUG            
-                rf12_sendStart(0, &setBack0, 5);                          // Issue a OTO to cancel setback.
-				rf12_sendWait(1);											// Wait for transmission complete.
-                rf12_sendStart(0, &setBack0, 5);                          // Issue a OTO to cancel setback.
-                rf12_sendWait(1);                                         // Wait for transmission complete.
+                rf12_sendStart(0, &setBack0, 5);			// Issue a OTO to cancel setback.
+				rf12_sendWait(1);							// Wait for transmission complete.
+                rf12_sendStart(0, &setBack0, 5);			// Issue a OTO to cancel setback.
+                rf12_sendWait(1);							// Wait for transmission complete.
 #endif
                 showString(PSTR("Setback Released\n"));
         		rf12_sleep(RF12_SLEEP);
-                backCount = 0;                                            // OTO every 10 mins
+                backCount = 0;								// OTO every 10 mins
                 payload.setBack = 0;
                 setback = false;
                 dataChanged = true;
@@ -595,15 +595,16 @@ void checkSetback () {
         } else {
             if (!(setback)) {
         		rf12_sleep(RF12_WAKEUP);
+        		payload.tick = (uint8_t)(seconds - elapsedSeconds);
 #if !DEBUG            
-                rf12_sendStart(0, &setBackA, 5);                          // Issue a OTO to setback.
-                rf12_sendWait(1);                                         // Wait for transmission complete.
-                rf12_sendStart(0, &setBackA, 5);                          // Issue a OTO to setback.
-                rf12_sendWait(1);                                         // Wait for transmission complete.
+                rf12_sendStart(0, &setBackA, 5);			// Issue a OTO to setback.
+                rf12_sendWait(1);							// Wait for transmission complete.
+                rf12_sendStart(0, &setBackA, 5);			// Issue a OTO to setback.
+                rf12_sendWait(1);							// Wait for transmission complete.
 #endif
                 showString(PSTR("Setback Issued\n"));
         		rf12_sleep(RF12_SLEEP);
-                backCount = 0;                                            // OTO every 10 mins
+                backCount = 0;								// OTO every 10 mins
                 payload.setBack = 1;
                 setback = true;
                 dataChanged = true;
@@ -614,12 +615,12 @@ void checkSetback () {
         	rf12_sleep(RF12_WAKEUP);
             if (setback) {
 #if !DEBUG
-                rf12_sendStart(0, &setBackA, 5);                          // Issue a OTO to refresh setback.
+                rf12_sendStart(0, &setBackA, 5);			// Issue a OTO to refresh setback.
 #endif
                 payload.setBack = 1;
             } else {
 #if !DEBUG
-                rf12_sendStart(0, &setBack0, 5);                          // Issue a OTO to refresh null setback.
+                rf12_sendStart(0, &setBack0, 5);			// Issue a OTO to refresh null setback.
 #endif
                 payload.setBack = 0;
             }
@@ -1077,22 +1078,23 @@ void loop () {
             }  
         }
     } 
-                
+/*                
 //	showString(PSTR("Voltage:"));
     payload.voltage = readVcc();
 //    Serial.println(payload.voltage);
 	if (payload.voltage > 28) {
-/* 
+ 
     	 showString(PSTR("Looping "));
          Serial.println(++loopCount);
     	 Serial.flush();
-*/
+
     } else {
         rf12_sleep(RF12_SLEEP);
         showString(PSTR("Replace batteries\n"));
     	Serial.flush();
     	cli();
     }
+*/
     showString(PSTR("Temp Trend=")); Serial.print(tempTrend);
     showString(PSTR(" elapsedSeconds=")); Serial.print(elapsedSeconds);
     showString(PSTR(" delaySeconds=")); Serial.print(delaySeconds);
