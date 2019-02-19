@@ -67,7 +67,8 @@ OneWire  ds(PD7); // DIO4
 unsigned long setbackMax = 595;	// Close to 10 minutes
 unsigned long backCount = setbackMax;
 unsigned long minute = 60;	// note the approx 2 seconds delay in code
-volatile unsigned long seconds, elapsedSeconds, nextScheduled, setbackTimer, delaySeconds;
+volatile unsigned long seconds, elapsedSeconds, nextScheduled, setbackTimer;
+unsigned long delaySeconds, waitSeconds;
 unsigned int loopCount;
 
 byte ColdFeed[8] = {0x28,0x53,0x4F,0x4E,0x04,0x00,0x00,0x84};
@@ -237,7 +238,6 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 			showString(PSTR("Ack Key="));
 			Serial.println(rf12_buf[3]);
         } else payload.ackKey = 85;
-//		delay(1000);	// Allow time for central node to turn around into RX mode
         
         if (rf12_len > 1) {
 			dataChanged = true;
@@ -293,17 +293,15 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                   		break;
                   		
 				case 12:
-                  		settings.tracking = true;
                 		needSetback = true;
+						dataChanged = false;	// Slow Ack required
                 		delaySeconds = elapsedSeconds + (uint32_t)post;
                 		Serial.print(post);
                   		showString(PSTR(" seconds of Setback\n"));
                   		break;
                   		
 				case 13:
-                  		settings.tracking = true;
-                		needSetback - false;
-                		delaySeconds = elapsedSeconds + (uint32_t)post;
+                		needSetback = false;
                 		delaySeconds = elapsedSeconds + (uint32_t)post;
                 		Serial.print(post);
                   		showString(PSTR(" seconds without Setback\n"));
@@ -937,10 +935,11 @@ void loop () {
 			
 			if (payload.currentTemp >= payload.targetTemp) {	// Backstop
 				needSetback = true;
-				delaySeconds = elapsedSeconds;
+				waitSeconds = elapsedSeconds;
 				Serial.print(payload.currentTemp); showString(PSTR(" Temperature Fine\n"));
 				
-			} else {
+			} else 
+			if (delaySeconds < elapsedSeconds) {
 				bool tempChanged;
 				int c = payload.currentTemp - previousCurrentTemp;
 				if (c) {
@@ -957,7 +956,7 @@ void loop () {
 				if (payload.targetTemp > previousTargetTemp) {
 					tempChanged = true;
 			 		showString(PSTR("Target temperature changed\n"));
-			 		tempTrend = (-50);	// We want a burnTime1
+			 		tempTrend = 50;	// We choose burnTime2
 					previousTargetTemp = payload.targetTemp;
 				} else
 				if (payload.targetTemp < previousTargetTemp) {
@@ -969,27 +968,28 @@ void loop () {
 				if (tempChanged){
 			 		showString(PSTR("A temperature changed\n"));
 					if (tempTrend > 0) {
-						delaySeconds = elapsedSeconds + (uint32_t)settings.burnTime2;
+						waitSeconds = elapsedSeconds + (uint32_t)settings.burnTime2;
 			 			showString(PSTR("burnTime2:"));
                   		Serial.println(settings.burnTime2);
 					} else {
-						delaySeconds = elapsedSeconds + (uint32_t)settings.burnTime1;
+						waitSeconds = elapsedSeconds + (uint32_t)settings.burnTime1;
 			 			showString(PSTR("burnTime1:"));
                   		Serial.println(settings.burnTime1);
 					}				
 				} 
 				
 				showString(PSTR("elapsedSeconds ")); Serial.println( (signed long int)(elapsedSeconds) );			   
-				showString(PSTR("delaySeconds ")); Serial.println( (signed long int)(delaySeconds) );			   
+				showString(PSTR("waitSeconds ")); Serial.println( (signed long int)(waitSeconds) );
+							   
 				bool waiting;
-				if (delaySeconds >= elapsedSeconds) {
+				if (waitSeconds >= elapsedSeconds) {
 					waiting = true;			
-					Serial.print( (signed long int)(delaySeconds - elapsedSeconds) );			   
+					Serial.print( (signed long int)(waitSeconds - elapsedSeconds) );			   
 			 		showString(PSTR(" Waiting\n"));
 				} else {
 					waiting = false;
-					delaySeconds = elapsedSeconds;
-//					Serial.print( (signed long int)(delaySeconds - elapsedSeconds) );			   
+					waitSeconds = elapsedSeconds;
+//					Serial.print( (signed long int)(waitSeconds - elapsedSeconds) );			   
 			 		showString(PSTR(" Not Waiting\n"));			
 				}				
 				
@@ -1003,7 +1003,7 @@ void loop () {
 				 		showString(PSTR("Boiler below threshold:"));
                   		Serial.println(payload.BoilerFeed);
 						needSetback = false;
-						delaySeconds = elapsedSeconds + (uint32_t)settings.burnTime3;
+						waitSeconds = elapsedSeconds + (uint32_t)settings.burnTime3;
                   		showString(PSTR(" burnTime3:"));
                   		Serial.println(settings.burnTime3);
 					}
@@ -1020,7 +1020,7 @@ void loop () {
 
 		}			// settings.tracking
 			
-		payload.status = (uint16_t)delaySeconds;
+		payload.status = (uint16_t)waitSeconds;
 		payload.elapsed = (uint16_t)elapsedSeconds;
 
         if (payloadReady) {
@@ -1097,7 +1097,7 @@ void loop () {
 */
     showString(PSTR("Temp Trend=")); Serial.print(tempTrend);
     showString(PSTR(" elapsedSeconds=")); Serial.print(elapsedSeconds);
-    showString(PSTR(" delaySeconds=")); Serial.print(delaySeconds);
+    showString(PSTR(" waitSeconds=")); Serial.print(waitSeconds);
     showString(PSTR(" Setback=")); Serial.print(setback);
     showString(PSTR(" needSetback=")); Serial.print(needSetback);
     showString(PSTR(" previousCurrentTemp=")); Serial.print(previousCurrentTemp);
