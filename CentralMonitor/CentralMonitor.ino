@@ -294,7 +294,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                   		
 				case 12:
                 		needSetback = true;
-						dataChanged = false;	// Slow Ack required
+//						dataChanged = false;	// Slow Ack required
                 		delaySeconds = elapsedSeconds + (uint32_t)post;
                 		Serial.print(post);
                   		showString(PSTR(" seconds of Setback\n"));
@@ -571,7 +571,7 @@ static word calcCrc (const void* ptr, byte len) {
     return crc;
 }
 
-void checkSetback () {
+void checkSetback () {	// Radio needs to be in Salus mode
         backCount++;
         if (!(needSetback)) {
             if (setback) {
@@ -1019,6 +1019,8 @@ void loop () {
 			showString(PSTR("Tracking disabled\n"));
 
 		}			// settings.tracking
+
+		checkSetback();
 			
 		payload.status = (uint16_t)waitSeconds;
 		payload.elapsed = (uint16_t)elapsedSeconds;
@@ -1037,8 +1039,6 @@ void loop () {
             }
         }            
 
-		checkSetback();
-		
         if ((elapsedSeconds >= nextScheduled) || (dataChanged)) {	// approx 60 seconds
         	dataChanged = false;
             payload.count++;
@@ -1054,7 +1054,6 @@ void loop () {
                 Serial.print(payloadSize);
                 showString(PSTR(" sizeof "));
                 Serial.println(sizeof (struct payload));
-//                Serial.flush();
             
                 byte tries = sendACK();
                 
