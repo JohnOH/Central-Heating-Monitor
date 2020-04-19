@@ -233,13 +233,17 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
             printOneChar(' ');
         }
 		Serial.println();
-		if (rf12_len > 0) {
+//		if (rf12_len > 0) {
+//        	payload.ackKey = rf12_buf[3];	// Acknowledge packet using return payload
+//			showString(PSTR("Ack Key="));
+//			Serial.println(rf12_buf[3]);
+//        } else payload.ackKey = 85;
+        
+        if (rf12_len > 1) {
         	payload.ackKey = rf12_buf[3];	// Acknowledge packet using return payload
 			showString(PSTR("Ack Key="));
 			Serial.println(rf12_buf[3]);
-        } else payload.ackKey = 85;
-        
-        if (rf12_len > 1) {
+
 			dataChanged = true;
         	unsigned int post = (uint16_t)setbackMax;
 			if (rf12_len > 3) {
@@ -422,8 +426,9 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                       	break;
 
                   } // end switch
-          }
-          return t;
+        } else payload.ackKey = 85;
+        	
+		return t;
       }
   }
   return 0;
@@ -440,7 +445,7 @@ static byte waitForAck(byte t) {
             
             if (rf12_crc == 0) {                          // Valid packet?
                 // see http://talk.jeelabs.net/topic/811#post-4712
-                if (rf12_hdr == (RF12_HDR_DST | RF12_HDR_CTL | NodeID)) {
+				if (rf12_hdr == (RF12_HDR_DST | RF12_HDR_CTL | NodeID)) {
                      showString(PSTR("ACK "));
                     return 1;            
                 }  else {
