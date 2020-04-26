@@ -62,6 +62,7 @@ OneWire  ds(PD7); // DIO4
  * schedule then this sketch will cancel the central heating demand.
  *
  * 13/04/2017 Tidy up lots of problems hearing Salus commands
+ * 19/04/2020 Accomodate extended basic ACK
  */
 
 unsigned long setbackMax = 595;	// Close to 10 minutes
@@ -159,11 +160,11 @@ static eeprom settings;
 // 28 C9 C5 4D 4 00 00 04
 //////////////////////////
 
-#define ACK_TIME       100  // number of milliseconds - to wait for an ack, an initial 100ms
-#define RETRY_LIMIT      15
+#define ACK_TIME       	30  // number of milliseconds - to wait for an ack, an initial 100ms
+#define RETRY_LIMIT      5
 
 byte payloadSize = BASIC_PAYLOAD_SIZE;
-byte NodeID = 16;
+byte NodeID = 17;
 word lastCRC;
 
 byte getOTO = false;
