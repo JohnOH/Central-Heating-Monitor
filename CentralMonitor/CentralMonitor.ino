@@ -5,6 +5,8 @@
 ///////////////////////////////////////////////////////////////////////////////
 // 
 #include <JeeLib.h>
+#include "RFAPI.h"		// Define
+rfAPI rfapi;			// Declare
 #include <avr/sleep.h>
 #include <OneWire.h>
 #include <avr/eeprom.h>
@@ -84,13 +86,22 @@ byte salusOff[] = {SALUSID, OFF, SALUSID | OFF, 90};
               08/12 is for 4 degrees setback switch
               16/20 is for 6 degrees setback switch
               24/28 is for Auto degrees setback switch
-*/
+
 byte commandOTO[] = {166, 163, 106, 0, 179};
 byte setBack0[] = {166, 163, 106, 24, 203};
 byte setBack2[] = {166, 163, 106, 4, 183}; // Setback temperature by 2 degrees
 byte setBack4[] = {166, 163, 106, 8, 183}; // Setback temperature by 4 degrees
 byte setBack6[] = {166, 163, 106, 16, 183}; // Setback temperature by 6 degrees
 byte setBackA[] = {166, 163, 106, 28, 207}; // Setback temperature by AUTO degrees
+*/
+byte commandOTO[] = {166, 228, 17, 0, 155};
+byte setBack0[] = {166, 228, 17, 24, 179};	// Auto Release
+byte setBack2[] = {166, 228, 17, 4, 159}; // Setback temperature by 2 degrees
+byte setBack4[] = {166, 228, 17, 12, 167}; // Setback temperature by 4 degrees
+byte setBack6[] = {166, 228, 17, 20, 175}; // Setback temperature by 6 degrees
+byte setBackA[] = {166, 228, 17, 28, 183}; // Setback temperature by AUTO degrees
+byte setPairing[] = {166, 228, 17, 26, 181}; // Pair with unit on cylinder
+
 byte setback = false; byte needSetback = false;
 int previousBoilerFeed;
 int previousReturn;
@@ -160,14 +171,15 @@ static eeprom settings;
 // 28 C9 C5 4D 4 00 00 04
 //////////////////////////
 
-#define ACK_TIME       	30  // number of milliseconds - to wait for an ack, an initial 100ms
-#define RETRY_LIMIT      5
+#define ACK_TIME       	100  // number of milliseconds - to wait for an ack, an initial 100ms
+#define RETRY_LIMIT      2
 
 byte payloadSize = BASIC_PAYLOAD_SIZE;
 byte NodeID = 17;
 word lastCRC;
 
 byte getOTO = false;
+byte doPairing = true;
 byte dataChanged = true;
 //signed int boilerTrend;
 //signed int returnTrend;
@@ -299,6 +311,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                   		
 				case 12:
                 		needSetback = true;
+                  		settings.tracking = true;
 //						dataChanged = false;	// Slow Ack required
                 		delaySeconds = elapsedSeconds + (uint32_t)post;
                 		Serial.print(post);
@@ -307,6 +320,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                   		
 				case 13:
                 		needSetback = false;
+                  		settings.tracking = true;
                 		delaySeconds = elapsedSeconds + (uint32_t)post;
                 		Serial.print(post);
                   		showString(PSTR(" seconds without Setback\n"));
@@ -337,6 +351,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 				case 98:	// Capture OTO code
 						getOTO = true;
 						showString(PSTR("Learning OTO codes\n"));
+						doPairing = true;
 						break;
 						
 				case 99:
@@ -820,7 +835,7 @@ static void waitRF12() {
                         		settings.checkOTO = (rf12_buf[5] - rf12_buf[4]);
                         		showString(PSTR(" Learned OTO Offset "));  Serial.println(settings.checkOTO);  Serial.flush();
                         		getOTO = false; // Learn no more
-                    		} else if ((payload.salusAddress == settings.addrOTO) && ((rf12_buf[5]) - rf12_buf[4] == settings.checkOTO)) {
+                    /*		} else if ((payload.salusAddress == settings.addrOTO) && ((rf12_buf[5]) - rf12_buf[4] == settings.checkOTO)) {
                         		showString(PSTR(" One Touch Override Matched"));
                         		showString(PSTR(", Relaying OTO\n"));  Serial.flush();
                         		// Update checksum // byte commandOTO[] = {166, 163, 106, 0, 179};
@@ -833,7 +848,8 @@ static void waitRF12() {
                         		rf12_sendStart(0, &commandOTO, 5);               // Forward the OTO command.
                         		rf12_sendWait(1);                                // Wait for transmission complete.
 #endif
-                        		rf12_sleep(RF12_SLEEP);                                
+                        		rf12_sleep(RF12_SLEEP);  
+                    */                              
                     		} else  {
                     			showString(PSTR(" One Touch Override Unknown\n"));  
                     			Serial.flush();
@@ -892,6 +908,14 @@ void loop () {
         salusMode = true;
     	for (byte i = 0; i < 66; i++) rf12_buf[i] = 0;              // Clear buffer
     } //salusMode
+    
+    if (doPairing) {
+    	rf12_sendStart(0, &setPairing, 5);			// Issue a OTO pairing request
+        rf12_sendWait(1);							// Wait for transmission complete.
+        rf12_sendStart(0, &setPairing, 5);			// and again for luck
+        rf12_sendWait(1);							// Wait for transmission complete.  
+        doPairing = false;  
+    }
                 
 	ds.reset();
     ds.skip();              // Next command to all devices

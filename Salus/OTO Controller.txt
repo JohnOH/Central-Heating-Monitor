@@ -41,6 +41,9 @@ Auto degrees setback
 In  166 217 1 24 152 S
 Out 166 217 1 28 156 S
 
+Syncronising with hot water cylinder unit
+    166 217 1 26 ??? ?
+
 The current slide switch settings are transmitted when batteries are inserted.
 When sync is triggered the current slide switch settings are also included.
 
