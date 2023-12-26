@@ -171,7 +171,7 @@ static eeprom settings;
 // 28 C9 C5 4D 4 00 00 04
 //////////////////////////
 
-#define ACK_TIME       	100  // number of milliseconds - to wait for an ack, an initial 100ms
+#define ACK_TIME       	200  // number of milliseconds - to wait for an ack, an initial 200ms
 #define RETRY_LIMIT      2
 
 byte payloadSize = BASIC_PAYLOAD_SIZE;
@@ -211,7 +211,6 @@ payload.boiler_target = settings.maxBoiler;
 payload.tracking = settings.tracking;
   
 for (byte t = 1; t <= RETRY_LIMIT; t++) {  
-    delay(t * t);                   // Increasing the gap between retransmissions
     payload.attempts = t;
     rf12_sleep(RF12_WAKEUP);
       
@@ -311,7 +310,6 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                   		
 				case 12:
                 		needSetback = true;
-                  		settings.tracking = true;
 //						dataChanged = false;	// Slow Ack required
                 		delaySeconds = elapsedSeconds + (uint32_t)post;
                 		Serial.print(post);
@@ -320,7 +318,6 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                   		
 				case 13:
                 		needSetback = false;
-                  		settings.tracking = true;
                 		delaySeconds = elapsedSeconds + (uint32_t)post;
                 		Serial.print(post);
                   		showString(PSTR(" seconds without Setback\n"));
@@ -856,6 +853,22 @@ static void waitRF12() {
                     		}
                     		break;
                     		
+                    	case 199:   // JeeStat OTO One Touch Direct Override
+                    		if ( rf12_buf[3] == 19 && rf12_buf[4] == 53 ) {	// My magic numbers
+                				showString(PSTR(" Jee:"));
+                				Serial.print(rf12_buf[3]);
+                				printOneChar(',');
+                				Serial.print(rf12_buf[4]);
+                				printOneChar(',');
+                       			Serial.print(rf12_buf[5]);
+                				needSetback = true;
+                				delaySeconds = elapsedSeconds + (uint32_t)rf12_buf[5];
+                				Serial.print( rf12_buf[5] );
+                  				showString(PSTR(" seconds of Setback\n"));
+                       			
+                       		}
+                        	break;
+                    		
                 		default:
                     		showString(PSTR(" Unknown "));
                     		for (byte i = 0; i < 8; i++) {;
@@ -1041,7 +1054,7 @@ void loop () {
 					needSetback = false;
 					Serial.print(payload.currentTemp); showString(PSTR(" Temperature under target\n"));
 				}
-			}
+			} // if (delaySeconds < elapsedSeconds)
 		
 		} else {	// settings.tracking
 		
