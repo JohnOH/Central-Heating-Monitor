@@ -113,8 +113,8 @@ struct payload{                                                                 
 byte ackKey;		  // Last command received in ACK
 byte badCRC:  4;      // Running count of CRC mismatches
 byte tracking:	1;	  // True if we are tracking and capping boiler output
-byte setBack: 1;      // True if a setback is pending
-byte packetType:  2;  // High order packet type bits
+byte setBack: 2;      // True if a setback is pending
+byte packetType:  1;  // High order packet type bits
 byte attempts: 4;     // transmission attempts
 byte count: 4;        // packet count
 byte tick;
@@ -171,7 +171,7 @@ static eeprom settings;
 // 28 C9 C5 4D 4 00 00 04
 //////////////////////////
 
-#define ACK_TIME       	200  // number of milliseconds - to wait for an ack, an initial 200ms
+#define ACK_TIME       	500  // number of milliseconds - to wait for an ack, an initial 200ms
 #define RETRY_LIMIT      2
 
 byte payloadSize = BASIC_PAYLOAD_SIZE;
@@ -239,7 +239,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
     if (acked) {
 		payload.tick = 0;    
         payloadSize = BASIC_PAYLOAD_SIZE;   // Packet was ACK'ed by someone
-		if (payload.packetType == 2) payload.packetType = 3;	// Repeated data flag
+		if (payload.packetType == 1) payload.packetType = 0;	// Repeated data flag
         for (byte i = 0; i < rf12_len; i++) {
             showByte(rf12_buf[i]);
             printOneChar(' ');
@@ -309,9 +309,12 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                   		break;
                   		
 				case 12:
-                		needSetback = true;
-//						dataChanged = false;	// Slow Ack required
-                		delaySeconds = elapsedSeconds + (uint32_t)post;
+// WIP
+						if ( delaySeconds < (elapsedSeconds + (uint32_t)post) ){
+                			needSetback = true;
+//							dataChanged = false;	// Slow Ack required
+                			delaySeconds = elapsedSeconds + (uint32_t)post;
+                		}
                 		Serial.print(post);
                   		showString(PSTR(" seconds of Setback\n"));
                   		break;
@@ -408,7 +411,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                       		Serial.print(payload.currentTemp);
 							previousCurrentTemp = payload.currentTemp;
 							payload.currentTemp = post;
-                      		payload.packetType = 1;	// Faked current Temp
+                      		payload.packetType = 0;	// Faked current Temp
                       		showString(PSTR(" Faked current temperature "));
                       		Serial.println(payload.currentTemp);
                         }
@@ -418,7 +421,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 						if ( (rf12_len > 3) && (post < 5000) ) {
                       		Serial.print(payload.targetTemp);
 							payload.targetTemp = post;
-                      		payload.packetType = 1;	// Faked target Temp
+                      		payload.packetType = 0;	// Faked target Temp
                       		showString(PSTR(" Faked target temperature "));
                       		Serial.println(payload.targetTemp);
                         }
@@ -443,7 +446,9 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
         	
 		return t;
       }
-  }
+// 	  Working Area
+//	  Sleepy::loseSomeTime(500);
+   }
   return 0;
 } // sendACK
 
@@ -817,7 +822,7 @@ static void waitRF12() {
                     		showString(PSTR(" Lowest="));   Serial.print(payload.lowestTemp);
                     		payload.targetTemp = ((rf12_buf[10] << 8) | rf12_buf[9]);
                     		showString(PSTR(" Target="));   Serial.println(payload.targetTemp);
-                    		payload.packetType = 2;      	// Indicate new data
+                    		payload.packetType = 1;      	// Indicate new data
 							payloadReady = true;
 							showString(PSTR("payload is ready\n"));
 							delay(3000);	// Wait for repeated Salus packets to pass
