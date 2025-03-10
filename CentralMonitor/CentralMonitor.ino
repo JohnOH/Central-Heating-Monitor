@@ -28,7 +28,7 @@ rfAPI rfapi;			// Declare
 
 #define SETTINGS_EEPROM_ADDR ((uint8_t*) 0x00)
 
-#define DEBUG 0
+#define DEBUG 1
 
 #if DEBUG
 	#define D(x) x
@@ -171,7 +171,7 @@ static eeprom settings;
 // 28 C9 C5 4D 4 00 00 04
 //////////////////////////
 
-#define ACK_TIME       	200  // number of milliseconds - to wait for an ack, an initial 200ms
+#define ACK_TIME       	250  // number of milliseconds - to wait for an ack
 #define RETRY_LIMIT      2
 
 byte payloadSize = BASIC_PAYLOAD_SIZE;
@@ -225,7 +225,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 //		Serial.flush(); 
     }
       
-    while (!(rf12_canSend())) {
+    while (!(rf12_canSend(1))) {	// 0 to ignore background noise, 1 to loop
 		showString(PSTR("Airwaves Busy\r"));
 		delay(50);
     }
@@ -235,7 +235,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 	rf12_sendWait(1);
 	showString(PSTR("TX Done\n"));
 	Serial.flush();      
-    byte acked = waitForAck(t * t); // Wait for increasingly longer time for the ACK
+    byte acked = waitForAck(0); // Wait for the ACK
     if (acked) {
 		payload.tick = 0;    
         payloadSize = BASIC_PAYLOAD_SIZE;   // Packet was ACK'ed by someone
@@ -449,7 +449,7 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 
 static byte waitForAck(byte t) {
     MilliTimer ackTimer;
-    while (!ackTimer.poll(ACK_TIME + t)) {
+    while (!ackTimer.poll(ACK_TIME)) {
         if (rf12_recvDone()) {
             rf12_sleep(RF12_SLEEP);
 
@@ -528,6 +528,9 @@ static void loadSettings () {
     showString(PSTR("Burn1 Time:"));
     Serial.println(settings.burnTime1);
 //    burnTime1 = (uint32_t)settings.burnTime1;
+
+settings.tracking = true;
+
 } // loadSettings
 
 static void printOneChar (char c) {
@@ -749,21 +752,21 @@ unsigned int getTemp(byte* sensor) {
 	ds.reset();
 	ds.select(sensor);    
 	ds.write(0xBE);                                            // Request Scratchpad
-/*
+
 	showString(PSTR("Data = "));
 	Serial.print(present,HEX);
 	showString(PSTR(" "));
-*/
+
 	for ( i = 0; i < 9; i++) {           // we need 9 bytes
 		data[i] = ds.read();
-//		Serial.print(data[i], HEX);
-//		showString(PSTR(" "));
+		Serial.print(data[i], HEX);
+		showString(PSTR(" "));
 	}
-/*
+
    showString(PSTR(" CRC="));
    Serial.print(OneWire::crc8(data, 8), HEX);
    Serial.println();
-*/
+
   // convert the data to actual temperature
 
   long int raw = (data[1] << 8) | data[0];
@@ -1137,6 +1140,7 @@ void loop () {
     	cli();
     }
 */
+
     showString(PSTR("Temp Trend=")); Serial.print(tempTrend);
     showString(PSTR(" elapsedSeconds=")); Serial.print(elapsedSeconds);
     showString(PSTR(" waitSeconds=")); Serial.print(waitSeconds);
@@ -1147,4 +1151,5 @@ void loop () {
     showString(PSTR(" targetTemp=")); Serial.print(payload.targetTemp);
     showString(PSTR(" backCount=")); Serial.print(backCount);
     Serial.println();
+
 } // Loop
