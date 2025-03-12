@@ -930,13 +930,13 @@ void loop () {
     	for (byte i = 0; i < 66; i++) rf12_buf[i] = 0;              // Clear buffer
     } //salusMode
 
-    if (doPairing) {
+//    if (doPairing) {
     	rf12_sendStart(0, &setPairing, 5);			// Issue a OTO pairing request
         rf12_sendWait(1);							// Wait for transmission complete.
         rf12_sendStart(0, &setPairing, 5);			// and again for luck
         rf12_sendWait(1);							// Wait for transmission complete.
         doPairing = false;
-    }
+//    }
 
 	ds.reset();
     ds.skip();              // Next command to all devices
