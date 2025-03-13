@@ -28,7 +28,7 @@ rfAPI rfapi;			// Declare
 
 #define SETTINGS_EEPROM_ADDR ((uint8_t*) 0x00)
 
-#define DEBUG 1
+#define DEBUG 0			// If enabled OTO commands are NOT transmitted!
 
 #if DEBUG
 	#define D(x) x
@@ -298,13 +298,16 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 				case 10:
                   		settings.tracking = false;
                 		needSetback = true;
+                		dataChanged = true;		// Cause a packet send
                   		showString(PSTR("Tracking off\n"));
                   		break;
 
 				case 11:
                   		settings.tracking = true;
+                  		doPairing = true;
                 		needSetback = false;
 						delaySeconds = elapsedSeconds;
+                		dataChanged = true;		// Cause a packet send
                   		showString(PSTR("Tracking on\n"));
                   		break;
 
@@ -312,9 +315,9 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 // WIP
 						if ( delaySeconds < (elapsedSeconds + (uint32_t)post) ){
                 			needSetback = true;
-//							dataChanged = false;	// Slow Ack required
                 			delaySeconds = elapsedSeconds + (uint32_t)post;
-                		}
+                		} 
+                		dataChanged = true;		// Cause a packet send
                 		Serial.print(post);
                   		showString(PSTR(" seconds of Setback\n"));
                   		break;
@@ -446,7 +449,6 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
 
 		return t;
       }
-// 	  Working Area
 //	  Sleepy::loseSomeTime(500);
    }
   return 0;
@@ -599,6 +601,13 @@ static word calcCrc (const void* ptr, byte len) {
 
 void checkSetback () {	// Radio needs to be in Salus mode
         backCount++;
+
+/*#if !DEBUG
+    	rf12_sendStart(0, &setPairing, 5);			// Issue a OTO pairing request
+    	rf12_sendWait(1);							// Wait for transmission complete.
+    	rf12_sendStart(0, &setPairing, 5);			// and again for luck
+        rf12_sendWait(1);							// Wait for transmission complete.
+#endi*/
         if (!(needSetback)) {
             if (setback) {
 		        rf12_sleep(RF12_WAKEUP);					// All set, wake up radio
@@ -683,10 +692,10 @@ void setup () {
    showString(PSTR(" "));
    Serial.println((__TIME__));
 #if RF69_COMPAT
-	payload.ackKey = 170;	// Indicate RFM69
+	payload.ackKey = 0;
    showString(PSTR("RFM69x "));
 #else
-	payload.ackKey = 85;	// Indicate RFM12B
+	payload.ackKey = 0;
 	showString(PSTR("\nRFM12x "));
 #endif
 	Serial.print(SALUSFREQUENCY);
@@ -699,7 +708,8 @@ void setup () {
    showString(PSTR("RFM12x "));
 #endif
 	Serial.flush();
-	payload.currentTemp = payload.targetTemp = (uint16_t)500;
+	payload.currentTemp = (uint16_t)500;
+	payload.targetTemp = (uint16_t)2000;	// Should turn on heating if tracking enabled
 	payload.packetType = 0;
 	payload.BoilerFeed = ~0;
 	payload.salusAddress = ~0;          // Until we know better
@@ -910,6 +920,7 @@ void loop () {
  * Setup to receive Salus transmissions
  */
 	if (!(salusMode)) {
+    	for (byte i = 0; i < 66; i++) rf12_buf[i] = 0;              // Clear buffer
     	rf12_initialize (SALUSID, RF12_868MHZ, 212, SALUSFREQUENCY);// 868.3khz
     	rf12_sleep(RF12_SLEEP);                                     // Sleep while we tweak things
     	rf12_skip_hdr(2);                                           // Omit Jeelib header 2 bytes on transmission
@@ -927,16 +938,15 @@ void loop () {
     	rf12_control(0x9830 | (settings.salusTX & 0x07) );			// 60khz freq shift, TX
 #endif
         salusMode = true;
-    	for (byte i = 0; i < 66; i++) rf12_buf[i] = 0;              // Clear buffer
-    } //salusMode
 
-//    if (doPairing) {
-    	rf12_sendStart(0, &setPairing, 5);			// Issue a OTO pairing request
-        rf12_sendWait(1);							// Wait for transmission complete.
-        rf12_sendStart(0, &setPairing, 5);			// and again for luck
-        rf12_sendWait(1);							// Wait for transmission complete.
-        doPairing = false;
-//    }
+    	if (doPairing) {
+    		rf12_sendStart(0, &setPairing, 5);			// Issue a OTO pairing request
+        	rf12_sendWait(1);							// Wait for transmission complete.
+        	rf12_sendStart(0, &setPairing, 5);			// and again for luck
+        	rf12_sendWait(1);							// Wait for transmission complete.
+        	doPairing = false;
+    	}
+    } //salusMode
 
 	ds.reset();
     ds.skip();              // Next command to all devices
@@ -1145,7 +1155,9 @@ void loop () {
     	cli();
     }
 */
-
+#if DEBUG
+    showString(PSTR("DEBUG Enabled - OTO NOT TRANSMITTED")); Serial.println();
+#endif
     showString(PSTR("Temp Trend=")); Serial.print(tempTrend);
     showString(PSTR(" elapsedSeconds=")); Serial.print(elapsedSeconds);
     showString(PSTR(" waitSeconds=")); Serial.print(waitSeconds);
@@ -1156,5 +1168,6 @@ void loop () {
     showString(PSTR(" targetTemp=")); Serial.print(payload.targetTemp);
     showString(PSTR(" backCount=")); Serial.print(backCount);
     Serial.println();
+//    delay(1000);
 
 } // Loop
