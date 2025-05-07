@@ -924,6 +924,7 @@ void loop () {
     	rf12_initialize (SALUSID, RF12_868MHZ, 212, SALUSFREQUENCY);// 868.3khz
     	rf12_sleep(RF12_SLEEP);                                     // Sleep while we tweak things
     	rf12_skip_hdr(2);                                           // Omit Jeelib header 2 bytes on transmission
+    	rf12_leader(0xAA);											// Apply typical framing
     	rf12_fix_len(15);                                           // Maximum fixed length packet size.
 
 #if RF69_COMPAT
