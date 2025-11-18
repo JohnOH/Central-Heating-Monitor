@@ -429,19 +429,19 @@ for (byte t = 1; t <= RETRY_LIMIT; t++) {
                       		Serial.println(payload.targetTemp);
                         }
 						break;
-
+/*
 				case 255:
                   		if ( (rf12_len == 2) && (rf12_buf[4] == 255) ) {
                   			showString(PSTR("Waiting for Watchdog\n"));
                   			delay(tenK);		// Wait for watchdog
                   		}
                   		break;
-
+*/
 				default:
 						payload.ackKey = 170;	// Indicate an issue
 						dataChanged = false;
 						Serial.print(rf12_buf[4]);
-						showString(PSTR(" Unknown Command\n"));
+						showString(PSTR(" Alert Unknown Command\n"));
                       	break;
 
                   } // end switch
